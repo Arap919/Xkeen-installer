@@ -15,6 +15,7 @@ import (
 const shellProbe = "printf 'XKEEN_SHELL_OK\\n'"
 const archProbe = "uname -m"
 const endianProbe = "od -An -tu1 -N6 /bin/sh"
+const activeCoreProbe = "ps w"
 const versionProbe = "/opt/bin/opkg list-installed"
 
 var inventoryRoots = []string{"/opt/etc/xkeen", "/opt/etc/xray", "/opt/etc/mihomo", "/opt/etc/xkeen-ui", "/opt/etc/nginx/ssl", "/opt/etc/lighttpd/conf.d/90-xkeenui.conf", "/opt/etc/router-watchdog.json", "/opt/etc/router-watchdog.json-old", "/opt/etc/router-watchdog.json-upgrade", "/opt/etc/crontab", "/opt/etc/cron.1min", "/opt/etc/init.d", "/opt/share/www/XKeen-UI", "/opt/var/spool/cron", "/opt/lib/opkg/status"}
@@ -23,14 +24,16 @@ const maxInventoryBytes = int64(64 << 20)
 const maxInventoryEntries = 10000
 
 type Snapshot struct {
-	Arch      catalog.RouterArch
-	Entware   bool
-	Available uint64
-	Files     []Entry
-	CronInit  []string
-	Versions  map[string]string
-	contents  map[string][]byte
-	inspected bool
+	Arch               catalog.RouterArch
+	Entware            bool
+	Available          uint64
+	Files              []Entry
+	CronInit           []string
+	Versions           map[string]string
+	ActiveCore         string
+	ActiveCoreEvidence string
+	contents           map[string][]byte
+	inspected          bool
 }
 
 // Config returns a defensive copy for backend configuration preparation. JSON cannot expose it.
@@ -39,13 +42,19 @@ func (s Snapshot) Config(p string) ([]byte, bool) {
 	return append([]byte(nil), b...), ok
 }
 func Inspect(ctx context.Context, t Transport) (Snapshot, error) {
-	s := Snapshot{contents: map[string][]byte{}, Versions: map[string]string{}}
+	s := Snapshot{contents: map[string][]byte{}, Versions: map[string]string{"xkeen": "unknown", "xray": "unknown", "mihomo": "unknown"}, ActiveCore: "unknown", ActiveCoreEvidence: "unavailable"}
 	r, err := t.Run(ctx, shellProbe)
-	if err != nil || r.ExitCode != 0 || string(r.Stdout) != "XKEEN_SHELL_OK\n" {
+	if err != nil {
+		return Snapshot{}, err
+	}
+	if r.ExitCode != 0 || string(r.Stdout) != "XKEEN_SHELL_OK\n" {
 		return Snapshot{}, errors.New("SSH endpoint is not a compatible POSIX shell")
 	}
 	r, err = t.Run(ctx, archProbe)
-	if err != nil || r.ExitCode != 0 {
+	if err != nil {
+		return Snapshot{}, err
+	}
+	if r.ExitCode != 0 {
 		return Snapshot{}, errors.New("cannot inspect CPU")
 	}
 	switch strings.TrimSpace(string(r.Stdout)) {
@@ -55,7 +64,10 @@ func Inspect(ctx context.Context, t Transport) (Snapshot, error) {
 		s.Arch = catalog.MIPSel
 	case "mips":
 		r, err = t.Run(ctx, endianProbe)
-		if err != nil || r.ExitCode != 0 {
+		if err != nil {
+			return Snapshot{}, err
+		}
+		if r.ExitCode != 0 {
 			return Snapshot{}, errors.New("cannot inspect MIPS byte order")
 		}
 		b := strings.Fields(string(r.Stdout))
@@ -79,7 +91,10 @@ func Inspect(ctx context.Context, t Transport) (Snapshot, error) {
 			return Snapshot{}, errors.New("opkg is not a regular file")
 		}
 		r, err = t.Run(ctx, versionProbe)
-		if err != nil || r.ExitCode != 0 {
+		if err != nil {
+			return Snapshot{}, err
+		}
+		if r.ExitCode != 0 {
 			return Snapshot{}, errors.New("opkg is present but unusable")
 		}
 		s.Entware = true
@@ -91,6 +106,48 @@ func Inspect(ctx context.Context, t Transport) (Snapshot, error) {
 		}
 	} else if !errors.Is(err, fs.ErrNotExist) {
 		return Snapshot{}, err
+	}
+	r, err = t.Run(ctx, activeCoreProbe)
+	if err != nil {
+		return Snapshot{}, err
+	}
+	if r.ExitCode == 0 {
+		seen := map[string]bool{}
+
+		commandColumn := 2 // Conservative PID USER COMMAND fallback when a header is absent.
+		for _, line := range strings.Split(string(r.Stdout), "\n") {
+			fields := strings.Fields(line)
+			if len(fields) == 0 {
+				continue
+			}
+			if fields[0] == "PID" {
+				for i, field := range fields {
+					if field == "COMMAND" || field == "CMD" || field == "ARGS" {
+						commandColumn = i
+					}
+				}
+				continue
+			}
+			if len(fields) <= commandColumn {
+				continue
+			}
+			switch fields[commandColumn] {
+			case "/opt/sbin/mihomo", "/opt/bin/mihomo":
+				seen["mihomo"] = true
+			case "/opt/sbin/xray", "/opt/bin/xray":
+				seen["xray"] = true
+			}
+		}
+
+		s.ActiveCoreEvidence = "no-core-process"
+		if len(seen) == 1 {
+			for core := range seen {
+				s.ActiveCore = core
+			}
+			s.ActiveCoreEvidence = "single-core-process"
+		} else if len(seen) > 1 {
+			s.ActiveCoreEvidence = "multiple-core-processes"
+		}
 	}
 	s.Available, err = t.AvailableBytes(ctx, "/opt")
 	if err != nil {

@@ -6,6 +6,11 @@ import (
 	"crypto/rand"
 	"errors"
 	"net"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"runtime"
+	"strings"
 	"testing"
 	"time"
 
@@ -13,8 +18,16 @@ import (
 	"golang.org/x/crypto/ssh"
 )
 
-func sshFixture(t *testing.T) (string, ssh.Signer) {
+func sshFixture(t *testing.T, shellOnly ...bool) (string, ssh.Signer) {
 	t.Helper()
+	shellMode := len(shellOnly) > 0 && shellOnly[0]
+	shellRoot := t.TempDir()
+	if shellMode {
+		if err := os.Mkdir(filepath.Join(shellRoot, "opt"), 0700); err != nil {
+			t.Fatal(err)
+		}
+	}
+
 	_, key, err := ed25519.GenerateKey(rand.Reader)
 	if err != nil {
 		t.Fatal(err)
@@ -54,6 +67,11 @@ func sshFixture(t *testing.T) (string, ssh.Signer) {
 						defer channel.Close()
 						for r := range requests {
 							if r.Type == "subsystem" {
+								if shellMode {
+									r.Reply(false, nil)
+									continue
+								}
+
 								var subsystem struct{ Name string }
 								if err := ssh.Unmarshal(r.Payload, &subsystem); err != nil || subsystem.Name != "sftp" {
 									r.Reply(false, nil)
@@ -73,6 +91,28 @@ func sshFixture(t *testing.T) (string, ssh.Signer) {
 								var command struct{ Command string }
 								ssh.Unmarshal(r.Payload, &command)
 								r.Reply(true, nil)
+								if shellMode {
+									script := strings.ReplaceAll(command.Command, "'/opt", "'"+filepath.Join(shellRoot, "opt"))
+									if runtime.GOOS == "darwin" {
+										script = strings.ReplaceAll(script, "stat -c '%a %s' --", "stat -f '%Lp %z'")
+									}
+									cmd := exec.Command("/bin/sh", "-c", script)
+									cmd.Dir = shellRoot
+									cmd.Stdin = channel
+									cmd.Stdout = channel
+									cmd.Stderr = channel.Stderr()
+									err := cmd.Run()
+									status := uint32(0)
+									if err != nil {
+
+										status = 1
+										if exit, ok := err.(*exec.ExitError); ok {
+											status = uint32(exit.ExitCode())
+										}
+									}
+									channel.SendRequest("exit-status", false, ssh.Marshal(struct{ Status uint32 }{status}))
+									return
+								}
 								switch command.Command {
 								case "ok":
 									channel.Write([]byte("safe-output"))
@@ -190,4 +230,67 @@ func TestSSHSFTPSafeAtomicRoundTrip(t *testing.T) {
 	if err := client.WriteAtomic(ctx, "/opt/../escape", []byte("private"), 0600); !errors.Is(err, ErrUnsafePath) {
 		t.Fatal("unsafe write allowed", err)
 	}
+}
+
+func TestSSHShellOnlyRoundTripAndVerifiedBackup(t *testing.T) {
+	addr, key := sshFixture(t, true)
+	client, err := DialSSH(context.Background(), SSHConfig{Address: addr, User: "root", HostKeyFingerprint: ssh.FingerprintSHA256(key.PublicKey())})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer client.Close()
+	ctx := context.Background()
+	if err := client.MkdirAll(ctx, "/opt/etc/xkeen/nested", 0700); err != nil {
+		t.Fatal(err)
+	}
+	p := "/opt/etc/xkeen/nested/user's $(touch HACKED); config.json"
+	for _, data := range [][]byte{[]byte("secret\x00\n'$(touch HACKED)"), []byte("replaced private bytes")} {
+		if err := client.WriteAtomic(ctx, p, data, 0640); err != nil {
+			t.Fatal(err)
+		}
+		actual, err := client.Read(ctx, p)
+		if err != nil || string(actual) != string(data) {
+			t.Fatal("shell roundtrip failed", err)
+		}
+	}
+	entry, err := client.Stat(ctx, p)
+	if err != nil || entry.Mode.Perm() != 0640 {
+		t.Fatal("mode not preserved", entry, err)
+	}
+	entries, err := client.ReadDir(ctx, "/opt/etc/xkeen/nested")
+	if err != nil || len(entries) != 1 {
+		t.Fatal("unexpected directory content", entries, err)
+	}
+	// Use real remote files for backup after a complete shell-only inspection wrapper.
+	inspected, err := Inspect(ctx, shellInspectTransport{client})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(inspected.Files) != 1 {
+		t.Fatal("missing remote config", inspected.Files)
+	}
+	m, err := Backup(ctx, client, inspected)
+	if err != nil || !m.Verified() {
+		t.Fatal("shell backup unverified", err)
+	}
+	actual, err := client.Read(ctx, m.Root+p)
+	if err != nil || string(actual) != "replaced private bytes" {
+		t.Fatal("backup differs", err)
+	}
+	if _, err := client.Read(ctx, "/opt/../etc/passwd"); !errors.Is(err, ErrUnsafePath) {
+		t.Fatal("traversal allowed", err)
+	}
+}
+
+// Local host architecture is irrelevant to the router fixture; filesystem operations remain real SSH shell operations.
+type shellInspectTransport struct{ *SSHTransport }
+
+func (t shellInspectTransport) Run(ctx context.Context, c string) (Result, error) {
+	if c == archProbe {
+		return Result{Stdout: []byte("aarch64")}, nil
+	}
+	if c == activeCoreProbe {
+		return Result{}, nil
+	}
+	return t.SSHTransport.Run(ctx, c)
 }

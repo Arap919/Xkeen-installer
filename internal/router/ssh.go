@@ -48,9 +48,10 @@ type SSHConfig struct {
 	Timeout            time.Duration
 }
 type SSHTransport struct {
-	client *ssh.Client
-	mu     sync.Mutex
-	sftp   *sftp.Client
+	client  *ssh.Client
+	mu      sync.Mutex
+	sftp    *sftp.Client
+	sftpErr error
 }
 
 func DialSSH(ctx context.Context, c SSHConfig) (*SSHTransport, error) {
@@ -122,12 +123,15 @@ func (t *SSHTransport) operation(ctx context.Context, fn func() error) error {
 type limitedBuffer struct{ bytes.Buffer }
 
 func (b *limitedBuffer) Write(p []byte) (int, error) {
-	if b.Len()+len(p) > 1<<20 {
+	if int64(b.Len()+len(p)) > maxInventoryBytes+1 {
 		return 0, errors.New("SSH output limit exceeded")
 	}
 	return b.Buffer.Write(p)
 }
 func (t *SSHTransport) Run(ctx context.Context, command string) (Result, error) {
+	return t.runInput(ctx, command, nil)
+}
+func (t *SSHTransport) runInput(ctx context.Context, command string, input []byte) (Result, error) {
 	var result Result
 	err := t.operation(ctx, func() error {
 		s, err := t.client.NewSession()
@@ -136,6 +140,7 @@ func (t *SSHTransport) Run(ctx context.Context, command string) (Result, error) 
 		}
 		defer s.Close()
 		var out, stderr limitedBuffer
+		s.Stdin = bytes.NewReader(input)
 		s.Stdout = &out
 		s.Stderr = &stderr
 		err = s.Run(command)
@@ -156,10 +161,14 @@ func (t *SSHTransport) Run(ctx context.Context, command string) (Result, error) 
 func (t *SSHTransport) fileClient() (*sftp.Client, error) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
+	if t.sftpErr != nil {
+		return nil, t.sftpErr
+	}
 	if t.sftp == nil {
 		c, err := sftp.NewClient(t.client)
 		if err != nil {
-			return nil, errors.New("SFTP subsystem unavailable")
+			t.sftpErr = errors.New("SFTP subsystem unavailable")
+			return nil, t.sftpErr
 		}
 		t.sftp = c
 	}
@@ -188,7 +197,7 @@ func checkPath(c *sftp.Client, p string, missing bool) error {
 	}
 	return nil
 }
-func (t *SSHTransport) Read(ctx context.Context, p string) ([]byte, error) {
+func (t *SSHTransport) sftpRead(ctx context.Context, p string) ([]byte, error) {
 	var data []byte
 	err := t.operation(ctx, func() error {
 		c, err := t.fileClient()
@@ -218,7 +227,7 @@ func (t *SSHTransport) Read(ctx context.Context, p string) ([]byte, error) {
 	})
 	return data, err
 }
-func (t *SSHTransport) Stat(ctx context.Context, p string) (Entry, error) {
+func (t *SSHTransport) sftpStat(ctx context.Context, p string) (Entry, error) {
 	var entry Entry
 	err := t.operation(ctx, func() error {
 		c, err := t.fileClient()
@@ -242,7 +251,7 @@ func (t *SSHTransport) Stat(ctx context.Context, p string) (Entry, error) {
 	})
 	return entry, err
 }
-func (t *SSHTransport) ReadDir(ctx context.Context, p string) ([]Entry, error) {
+func (t *SSHTransport) sftpReadDir(ctx context.Context, p string) ([]Entry, error) {
 	var entries []Entry
 	err := t.operation(ctx, func() error {
 		c, err := t.fileClient()
@@ -266,7 +275,7 @@ func (t *SSHTransport) ReadDir(ctx context.Context, p string) ([]Entry, error) {
 	})
 	return entries, err
 }
-func (t *SSHTransport) MkdirAll(ctx context.Context, p string, mode fs.FileMode) error {
+func (t *SSHTransport) sftpMkdirAll(ctx context.Context, p string, mode fs.FileMode) error {
 	return t.operation(ctx, func() error {
 		c, err := t.fileClient()
 		if err != nil {
@@ -301,7 +310,7 @@ func (t *SSHTransport) MkdirAll(ctx context.Context, p string, mode fs.FileMode)
 		return nil
 	})
 }
-func (t *SSHTransport) AvailableBytes(ctx context.Context, p string) (uint64, error) {
+func (t *SSHTransport) sftpAvailableBytes(ctx context.Context, p string) (uint64, error) {
 	var available uint64
 	err := t.operation(ctx, func() error {
 		if p != "/opt" {
@@ -325,7 +334,7 @@ func (t *SSHTransport) AvailableBytes(ctx context.Context, p string) (uint64, er
 	})
 	return available, err
 }
-func (t *SSHTransport) WriteAtomic(ctx context.Context, p string, data []byte, mode fs.FileMode) error {
+func (t *SSHTransport) sftpWriteAtomic(ctx context.Context, p string, data []byte, mode fs.FileMode) error {
 	return t.operation(ctx, func() error {
 		c, err := t.fileClient()
 		if err != nil {

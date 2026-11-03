@@ -37,8 +37,10 @@ func (f *fakeTransport) Run(_ context.Context, c string) (Result, error) {
 		return Result{Stdout: []byte(f.arch)}, nil
 	case endianProbe:
 		return Result{Stdout: []byte(" 127 69 76 70 1 1")}, nil
+	case activeCoreProbe:
+		return Result{}, nil
 	case versionProbe:
-		return Result{Stdout: []byte("Package: opkg\nVersion: 1\n")}, nil
+		return Result{Stdout: []byte("opkg - 1\n")}, nil
 	}
 	return Result{}, errors.New("unexpected command")
 }

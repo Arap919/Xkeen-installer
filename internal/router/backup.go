@@ -18,10 +18,12 @@ type BackupFile struct {
 	SHA256 string
 }
 type BackupManifest struct {
-	Root     string
-	Files    []BackupFile
-	Versions map[string]string
-	verified bool
+	Root               string
+	Files              []BackupFile
+	Versions           map[string]string
+	ActiveCore         string
+	ActiveCoreEvidence string
+	verified           bool
 }
 
 // Verified is true only for a manifest produced after successful copy and read-back.
@@ -68,7 +70,7 @@ func Backup(ctx context.Context, t Transport, s Snapshot) (BackupManifest, error
 	if _, err := rand.Read(id); err != nil {
 		return fail(err)
 	}
-	m := BackupManifest{Root: "/opt/.xkeen-installer-backups/" + hex.EncodeToString(id), Versions: map[string]string{}}
+	m := BackupManifest{Root: "/opt/.xkeen-installer-backups/" + hex.EncodeToString(id), Versions: map[string]string{}, ActiveCore: s.ActiveCore, ActiveCoreEvidence: s.ActiveCoreEvidence}
 	if err := t.MkdirAll(ctx, m.Root, 0700); err != nil {
 		return fail(err)
 	}
