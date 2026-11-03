@@ -5,6 +5,7 @@ import (
 	"crypto/ed25519"
 	"crypto/rand"
 	"errors"
+	"io"
 	"net"
 	"os"
 	"os/exec"
@@ -21,6 +22,7 @@ import (
 func sshFixture(t *testing.T, shellOnly ...bool) (string, ssh.Signer) {
 	t.Helper()
 	shellMode := len(shellOnly) > 0 && shellOnly[0]
+	truncateWrites := len(shellOnly) > 1 && shellOnly[1]
 	shellRoot := t.TempDir()
 	if shellMode {
 		if err := os.Mkdir(filepath.Join(shellRoot, "opt"), 0700); err != nil {
@@ -95,10 +97,14 @@ func sshFixture(t *testing.T, shellOnly ...bool) (string, ssh.Signer) {
 									script := strings.ReplaceAll(command.Command, "'/opt", "'"+filepath.Join(shellRoot, "opt"))
 									if runtime.GOOS == "darwin" {
 										script = strings.ReplaceAll(script, "stat -c '%a %s' --", "stat -f '%Lp %z'")
+										script = strings.ReplaceAll(script, "stat -c '%s' --", "stat -f '%z'")
 									}
 									cmd := exec.Command("/bin/sh", "-c", script)
 									cmd.Dir = shellRoot
 									cmd.Stdin = channel
+									if truncateWrites && strings.Contains(command.Command, "(set -C; cat > ") {
+										cmd.Stdin = io.LimitReader(channel, 10)
+									}
 									cmd.Stdout = channel
 									cmd.Stderr = channel.Stderr()
 									err := cmd.Run()
@@ -293,4 +299,33 @@ func (t shellInspectTransport) Run(ctx context.Context, c string) (Result, error
 		return Result{}, nil
 	}
 	return t.SSHTransport.Run(ctx, c)
+}
+
+func TestSSHShellInterruptedStdinPreservesDestination(t *testing.T) {
+	addr, key := sshFixture(t, true, true)
+	client, err := DialSSH(context.Background(), SSHConfig{Address: addr, User: "root", HostKeyFingerprint: ssh.FingerprintSHA256(key.PublicKey())})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer client.Close()
+	ctx := context.Background()
+	if err := client.MkdirAll(ctx, "/opt/configs", 0700); err != nil {
+		t.Fatal(err)
+	}
+	p := "/opt/configs/config.json"
+	if err := client.WriteAtomic(ctx, p, []byte("original"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	// The server exposes ten bytes followed by normal EOF to cat, without terminating the shell.
+	if err := client.WriteAtomic(ctx, p, []byte(strings.Repeat("replacement", 8)), 0600); err == nil {
+		t.Fatal("truncated stdin accepted")
+	}
+	b, err := client.Read(ctx, p)
+	if err != nil || string(b) != "original" {
+		t.Fatalf("original destination changed: %q (%v)", b, err)
+	}
+	entries, err := client.ReadDir(ctx, "/opt/configs")
+	if err != nil || len(entries) != 1 || entries[0].Path != p {
+		t.Fatal("temporary file not cleaned up", entries, err)
+	}
 }

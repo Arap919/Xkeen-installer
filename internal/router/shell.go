@@ -250,7 +250,8 @@ func (t *SSHTransport) shellWriteAtomic(ctx context.Context, p string, b []byte,
 	q := shellQuote(p)
 	qt := shellQuote(temp)
 	cleanup := shellQuote("rm -f -- " + qt)
-	command := guard + "[ ! -d " + q + " ] || exit 46; umask 077; trap " + cleanup + " 0; (set -C; cat > " + qt + ") || exit 46; chmod " + fmt.Sprintf("%o", m.Perm()) + " " + qt + " || exit 46; " + guard + "[ ! -d " + q + " ] || exit 46; mv -f -- " + qt + " " + q
+	complete := "size=$(stat -c '%s' -- " + qt + ") || exit 46; [ \"$size\" = " + shellQuote(strconv.Itoa(len(b))) + " ] || exit 46; "
+	command := guard + "[ ! -d " + q + " ] || exit 46; umask 077; trap " + cleanup + " 0; (set -C; cat > " + qt + ") || exit 46; " + complete + "chmod " + fmt.Sprintf("%o", m.Perm()) + " " + qt + " || exit 46; " + guard + "[ ! -d " + q + " ] || exit 46; mv -f -- " + qt + " " + q
 	_, err = t.shellCommand(ctx, command, b)
 	return err
 }
