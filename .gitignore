@@ -1,0 +1,8 @@
+.env
+*.key
+credentials.json
+secrets/
+node_modules/
+frontend/dist/
+build/bin/
+.DS_Store
