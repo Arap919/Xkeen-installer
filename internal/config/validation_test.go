@@ -113,3 +113,63 @@ func TestKnownCoreStructuresStillReady(t *testing.T) {
 		}
 	}
 }
+
+func TestXrayServerObjectsAndRoutingReferences(t *testing.T) {
+	inbound := `"inbounds":[{"tag":"transparent","protocol":"dokodemo-door","port":50080,"settings":{"network":"tcp,udp","followRedirect":true}}]`
+	for _, tc := range []struct {
+		name, outbound, routing string
+		ready                   bool
+	}{
+		{"null vnext", `{"protocol":"vless","settings":{"vnext":[null]}}`, "", false},
+		{"empty vnext object", `{"protocol":"vless","settings":{"vnext":[{}]}}`, "", false},
+		{"null vnext user", `{"protocol":"vless","settings":{"vnext":[{"address":"example.invalid","port":443,"users":[null]}]}}`, "", false},
+		{"invalid server port", `{"protocol":"http","settings":{"servers":[{"address":"example.invalid","port":0}]}}`, "", false},
+		{"missing trojan password", `{"protocol":"trojan","settings":{"servers":[{"address":"example.invalid","port":443}]}}`, "", false},
+		{"missing outbound tag", `{"tag":"direct","protocol":"freedom","settings":{}}`, `,"routing":{"rules":[{"type":"field","outboundTag":"MISSING"}]}`, false},
+		{"missing inbound tag", `{"tag":"direct","protocol":"freedom","settings":{}}`, `,"routing":{"rules":[{"type":"field","inboundTag":["MISSING"],"outboundTag":"direct"}]}`, false},
+		{"unsupported balancer", `{"tag":"direct","protocol":"freedom","settings":{}}`, `,"routing":{"rules":[{"type":"field","balancerTag":"MISSING"}]}`, false},
+		{"valid server", `{"protocol":"vless","settings":{"vnext":[{"address":"example.invalid","port":443,"users":[{"id":"00000000-0000-4000-8000-000000000001","encryption":"none"}]}]}}`, "", true},
+		{"valid routing", `{"tag":"direct","protocol":"freedom","settings":{}}`, `,"routing":{"rules":[{"type":"field","inboundTag":["transparent"],"outboundTag":"direct"}]}`, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			data := []byte(`{` + inbound + `,"outbounds":[` + tc.outbound + `]` + tc.routing + `}`)
+			p, e := Prepare(snapshot(t, "", nil), Selection{Cores: []catalog.Component{catalog.Xray}, ActiveCore: catalog.Xray}, LocalImport(catalog.Xray, data))
+			if e != nil {
+				t.Fatal(e)
+			}
+			if p.ActivationReady != tc.ready {
+				t.Fatalf("ready=%v want %v: %+v", p.ActivationReady, tc.ready, p)
+			}
+			b, _ := p.File(XrayPath)
+			if string(b) != string(data) {
+				t.Fatal("config rewritten")
+			}
+			if !tc.ready && len(p.Conflicts) == 0 {
+				t.Fatal("missing conflict")
+			}
+		})
+	}
+}
+func TestMihomoRuleProviderReferences(t *testing.T) {
+	for _, tc := range []struct {
+		name, extra string
+		ready       bool
+	}{
+		{"missing provider", "", false},
+		{"wrong provider type", "rule-providers: {MISSING: null}\n", false},
+		{"incomplete provider", "rule-providers: {MISSING: {type: http}}\n", false},
+		{"valid provider", "rule-providers:\n  MISSING: {type: http, behavior: domain, url: 'https://example.invalid/rules', path: './rules/domain.yaml'}\n", true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			data := []byte("port: 7890\nrules: ['RULE-SET,MISSING,DIRECT', 'MATCH,DIRECT']\n" + tc.extra)
+			p, e := Prepare(snapshot(t, "mihomo", map[string][]byte{MihomoPath: data}), Selection{Cores: []catalog.Component{catalog.Mihomo}}, Import{})
+			if e != nil || p.ActivationReady != tc.ready {
+				t.Fatalf("ready=%v want %v: %v %+v", p.ActivationReady, tc.ready, e, p)
+			}
+			b, _ := p.File(MihomoPath)
+			if string(b) != string(data) {
+				t.Fatal("config rewritten")
+			}
+		})
+	}
+}

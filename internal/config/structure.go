@@ -56,11 +56,11 @@ func coreStructure(core string, b []byte) bool {
 				switch proto {
 				case "freedom", "blackhole", "dns":
 				case "vless", "vmess":
-					if a, ok := settings["vnext"].([]any); !ok || len(a) == 0 {
+					if !xrayServers(settings, proto) {
 						return false
 					}
 				case "trojan", "shadowsocks", "socks", "http":
-					if a, ok := settings["servers"].([]any); !ok || len(a) == 0 {
+					if !xrayServers(settings, proto) {
 						return false
 					}
 				default:
@@ -76,7 +76,7 @@ func coreStructure(core string, b []byte) bool {
 			}
 		}
 	}
-	return true
+	return xrayRouting(m)
 }
 func validPort(v any) bool {
 	switch n := v.(type) {
@@ -242,6 +242,11 @@ func mihomoStructure(m map[string]any) bool {
 			parts := strings.Split(rule, ",")
 			if len(parts) < 2 {
 				return false
+			}
+			if parts[0] == "RULE-SET" {
+				if len(parts) < 3 || !mihomoRuleProvider(m, parts[1]) {
+					return false
+				}
 			}
 			i := len(parts) - 1
 			if parts[i] == "no-resolve" {
