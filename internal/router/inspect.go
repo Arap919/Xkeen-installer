@@ -18,7 +18,7 @@ const endianProbe = "od -An -tu1 -N6 /bin/sh"
 const activeCoreProbe = "ps w"
 const versionProbe = "/opt/bin/opkg list-installed"
 
-var inventoryRoots = []string{"/opt/etc/xkeen", "/opt/etc/xray", "/opt/etc/mihomo", "/opt/etc/xkeen-ui", "/opt/etc/nginx/ssl", "/opt/etc/lighttpd/conf.d/90-xkeenui.conf", "/opt/etc/router-watchdog.json", "/opt/etc/router-watchdog.json-old", "/opt/etc/router-watchdog.json-upgrade", "/opt/etc/crontab", "/opt/etc/cron.1min", "/opt/etc/init.d", "/opt/share/www/XKeen-UI", "/opt/var/spool/cron", "/opt/lib/opkg/status"}
+var inventoryRoots = []string{"/opt/etc/xkeen", "/opt/etc/xray", "/opt/etc/mihomo", "/opt/etc/xkeen-ui", "/opt/etc/nginx/ssl", "/opt/etc/lighttpd/conf.d/90-xkeenui.conf", "/opt/etc/router-watchdog.json", "/opt/etc/router-watchdog.json-old", "/opt/etc/router-watchdog.json-upgrade", "/opt/etc/crontab", "/opt/etc/cron.1min", "/opt/etc/init.d", "/opt/share/www/XKeen-UI", "/opt/var/spool/cron", "/opt/lib/opkg/status", "/opt/etc/ndm/netfilter.d/proxy.sh", "/opt/etc/ndm/schedule.d/00-xkeen-hotspot-sync.sh"}
 
 const maxInventoryBytes = int64(64 << 20)
 const maxInventoryEntries = 10000

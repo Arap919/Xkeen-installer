@@ -57,3 +57,22 @@ func TestInspectPreservesCancellationAtCommandBoundaries(t *testing.T) {
 		}
 	}
 }
+
+func TestOwnedXkeenHooksIncludedInBackupInventory(t *testing.T) {
+	f := fixture()
+	f.files["/opt/etc/ndm/netfilter.d/proxy.sh"] = []byte("owned-hook")
+	f.files["/opt/etc/ndm/netfilter.d/unrelated.sh"] = []byte("unrelated")
+	f.files["/opt/etc/ndm/schedule.d/00-xkeen-hotspot-sync.sh"] = []byte("owned-schedule")
+	s, e := Inspect(context.Background(), f)
+	if e != nil {
+		t.Fatal(e)
+	}
+	for _, p := range []string{"/opt/etc/ndm/netfilter.d/proxy.sh", "/opt/etc/ndm/schedule.d/00-xkeen-hotspot-sync.sh"} {
+		if _, ok := s.Config(p); !ok {
+			t.Fatal("owned hook omitted", p)
+		}
+	}
+	if _, ok := s.Config("/opt/etc/ndm/netfilter.d/unrelated.sh"); ok {
+		t.Fatal("unrelated hook included")
+	}
+}

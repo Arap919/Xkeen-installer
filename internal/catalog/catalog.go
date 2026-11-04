@@ -16,6 +16,7 @@ const (
 	Mihomo   Component = "mihomo"
 	Xray     Component = "xray"
 	UI       Component = "ui"
+	Yq       Component = "yq"
 	Watchdog Component = "watchdog"
 )
 
@@ -80,6 +81,26 @@ func Resolve(c Component, arch RouterArch) (Artifact, error) {
 		name = "xkeen.tar.gz"
 		a.Size = 129691
 		a.Integrity.SHA256 = "4b9350b11fab7fd3e4973db609db0fb780994f4b5ab0096f0549bc52acac8c73"
+	case Yq:
+		repo = "mikefarah/yq"
+		a.Version = "v4.54.1"
+		switch arch {
+		case ARM64:
+			name = "yq_linux_arm64"
+			a.Size = 13172896
+			a.Integrity.SHA256 = "189088da0c6429ec5178dfaab1a114805f6cab0b61b165ab236efedf1d57a71b"
+		case MIPS, MIPSel:
+			repo = "jameszeroX/yq"
+			a.Version = "260527"
+			a.Size = 15139009
+			if arch == MIPS {
+				name = "yq_linux_mips"
+				a.Integrity.SHA256 = "05ed5069325c2caea97e717a36aaab161f365afa4af862b38c51ef32a2608b41"
+			} else {
+				name = "yq_linux_mipsle"
+				a.Integrity.SHA256 = "9271b89b0618a4fb5034f2688eaf6433756f5342c97b3bf9cbffdd04fcd29dd7"
+			}
+		}
 	case Mihomo:
 		repo = "MetaCubeX/mihomo"
 		a.Version = "v1.19.33"

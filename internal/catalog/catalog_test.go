@@ -133,3 +133,16 @@ func TestVerifyBytesKnownDigestAndReadFailure(t *testing.T) {
 type failingReader struct{}
 
 func (failingReader) Read([]byte) (int, error) { return 0, io.ErrUnexpectedEOF }
+
+func TestPinnedYqDependency(t *testing.T) {
+	a, err := Resolve(Yq, ARM64)
+	if err != nil || a.Version != "v4.54.1" || a.Size != 13172896 || a.Integrity.SHA256 != "189088da0c6429ec5178dfaab1a114805f6cab0b61b165ab236efedf1d57a71b" {
+		t.Fatal(a, err)
+	}
+	for _, arch := range []RouterArch{MIPS, MIPSel} {
+		a, err := Resolve(Yq, arch)
+		if err != nil || a.Version != "260527" || a.Size != 15139009 || !strings.Contains(a.URL, "jameszeroX/yq/releases/download/260527/") {
+			t.Fatal(a, err)
+		}
+	}
+}
