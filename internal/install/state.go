@@ -4,6 +4,7 @@ package install
 import (
 	"encoding/json"
 	"errors"
+	"io/fs"
 	"sync/atomic"
 
 	"github.com/Arap919/xkeen-installer/internal/catalog"
@@ -42,17 +43,18 @@ type Plan struct {
 	confirmed    bool
 }
 type planData struct {
-	preview        string
-	fingerprint    [32]byte
-	snapshot       router.Snapshot
-	selection      Selection
-	configs        []payload
-	artifacts      []catalog.Artifact
-	active         catalog.Component
-	existingInit   []byte
-	configuredCore catalog.Component
-	pending        []string
-	used           atomic.Bool
+	preview          string
+	fingerprint      [32]byte
+	snapshot         router.Snapshot
+	selection        Selection
+	configs          []payload
+	artifacts        []catalog.Artifact
+	active           catalog.Component
+	existingInit     []byte
+	existingInitMode fs.FileMode
+	configuredCore   catalog.Component
+	pending          []string
+	used             atomic.Bool
 }
 type Event struct {
 	Step   string

@@ -84,12 +84,7 @@ func BuildPlan(s router.Snapshot, selection Selection, proposal config.ConfigPro
 			return fail("Конфигурация требует ручного согласования")
 		}
 	}
-	d := &planData{snapshot: s, selection: selection, active: active}
-	for _, c := range proposal.Conflicts {
-		if active != catalog.Xray && c.Path == config.XrayPath && strings.HasPrefix(c.Reason, "Add a user proxy outbound") {
-			d.pending = append(d.pending, "Xray установлен как неактивное ядро; соединение и маршрутизация требуют настройки перед его запуском")
-		}
-	}
+	d := &planData{snapshot: s, selection: selection, active: active, existingInitMode: 0755}
 	var err error
 	d.fingerprint, err = fingerprint(s)
 	if err != nil {
@@ -141,11 +136,12 @@ func BuildPlan(s router.Snapshot, selection Selection, proposal config.ConfigPro
 				}
 				return fail("Конфигурация не прошла структурную проверку")
 			}
-			if c == catalog.Xray && c == active && !exists {
-				base, _ := config.Prepare(s, config.Selection{Cores: []catalog.Component{c}, ActiveCore: c}, config.Import{})
-				v, _ := base.File(canonical)
-				if bytes.Equal(v, b) {
+			if c == catalog.Xray && unconfiguredXrayBase(b) {
+				if c == active {
 					return fail("Настройте соединение Xray перед активацией")
+				}
+				if len(d.pending) == 0 {
+					d.pending = append(d.pending, "Xray установлен как неактивное ядро; соединение и маршрутизация требуют настройки перед его запуском")
 				}
 			}
 			mode := fs.FileMode(0600)
@@ -219,6 +215,11 @@ func BuildPlan(s router.Snapshot, selection Selection, proposal config.ConfigPro
 			return fail("Нестандартный init XKeen требует ручной проверки")
 		}
 		d.existingInit = append([]byte(nil), b...)
+		for _, f := range s.Files {
+			if f.Path == "/opt/etc/init.d/S05xkeen" {
+				d.existingInitMode = f.Mode.Perm()
+			}
+		}
 	}
 	if len(d.existingInit) == 0 && s.ActiveCoreEvidence == "single-core-process" {
 		return fail("Запущенное ядро без известного init требует ручной проверки")
@@ -297,7 +298,7 @@ func BuildPlan(s router.Snapshot, selection Selection, proposal config.ConfigPro
 			initAction = "Изменить только name_client для выбранного ядра"
 		}
 	}
-	p.Changes = append(p.Changes, FileChange{"/opt/etc/init.d/S05xkeen", initAction, "0755 (существующие права сохраняются)"})
+	p.Changes = append(p.Changes, FileChange{"/opt/etc/init.d/S05xkeen", initAction, fmt.Sprintf("%04o", d.existingInitMode)})
 	if selection.UI {
 		action := "Создать отключённый init; TLS ещё не проверен"
 		if _, ok := s.Config("/opt/etc/init.d/S99xkeen-ui"); ok {
@@ -339,4 +340,24 @@ func BuildPlan(s router.Snapshot, selection Selection, proposal config.ConfigPro
 }
 func safeTarget(p string) bool {
 	return strings.HasPrefix(p, "/opt/") && path.Clean(p) == p && !strings.ContainsAny(p, "\x00\r\n")
+}
+
+// Recognize only the installer's known unfinished base, including whitespace or
+// key-order changes. Its status comes from private bytes, not mutable DTO flags.
+func unconfiguredXrayBase(data []byte) bool {
+	base, err := config.Prepare(router.Snapshot{}, config.Selection{Cores: []catalog.Component{catalog.Xray}, ActiveCore: catalog.Xray}, config.Import{})
+	if err != nil {
+		return false
+	}
+	expected, ok := base.File(config.XrayPath)
+	if !ok {
+		return false
+	}
+	var actualValue, baseValue any
+	if json.Unmarshal(data, &actualValue) != nil || json.Unmarshal(expected, &baseValue) != nil {
+		return false
+	}
+	actualJSON, _ := json.Marshal(actualValue)
+	baseJSON, _ := json.Marshal(baseValue)
+	return bytes.Equal(actualJSON, baseJSON)
 }

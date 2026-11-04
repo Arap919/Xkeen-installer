@@ -58,7 +58,7 @@ func (f *fakeRouter) Run(ctx context.Context, c string) (router.Result, error) {
 	if c == "/opt/etc/init.d/S05xkeen stop" {
 		f.active = ""
 	}
-	if c == "/opt/etc/init.d/S05xkeen start on" {
+	if strings.HasPrefix(c, "/opt/etc/init.d/S05xkeen start on") {
 		b := string(f.files["/opt/etc/init.d/S05xkeen"])
 		f.active = "xray"
 		if strings.Contains(b, `name_client="mihomo"`) {

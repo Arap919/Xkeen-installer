@@ -108,6 +108,11 @@ func run(ctx context.Context, p Plan, t router.Transport, emit func(Event), load
 			return fail()
 		}
 	}
+	// Upstream init resolves a bare core through /opt/bin before /opt/sbin.
+	// Never validate one executable and subsequently launch a shadowing one.
+	if _, e := t.Stat(ctx, "/opt/bin/"+string(d.active)); !errors.Is(e, fs.ErrNotExist) {
+		return fail()
+	}
 	for _, a := range d.artifacts {
 		if a.Component == catalog.Yq {
 			if _, e := t.Stat(ctx, "/opt/bin/yq"); !errors.Is(e, fs.ErrNotExist) {
@@ -195,7 +200,7 @@ func run(ctx context.Context, p Plan, t router.Transport, emit func(Event), load
 		init = bytes.Replace(init, []byte("name_client=\""+string(d.configuredCore)+"\""), []byte("name_client=\""+string(d.active)+"\""), 1)
 	}
 	if len(d.existingInit) == 0 || !bytes.Equal(init, d.existingInit) {
-		if err = write(payload{path: "/opt/etc/init.d/S05xkeen", data: init, mode: 0755}); err != nil {
+		if err = write(payload{path: "/opt/etc/init.d/S05xkeen", data: init, mode: d.existingInitMode}); err != nil {
 			return fail()
 		}
 	}
@@ -273,7 +278,7 @@ func run(ctx context.Context, p Plan, t router.Transport, emit func(Event), load
 	mutating = true
 	// Calling the standalone init avoids xkeen's implicit self-healing opkg writes
 	// and its detach behavior. 'on' requests a synchronous, explicit user start.
-	if _, err = command(ctx, t, "/opt/etc/init.d/S05xkeen start on"); err != nil {
+	if _, err = command(ctx, t, serviceLaunch("/opt/etc/init.d/S05xkeen start on")); err != nil {
 		return fail()
 	}
 	if _, err = command(ctx, t, "/opt/etc/init.d/S05xkeen status"); err != nil {
@@ -320,7 +325,7 @@ func run(ctx context.Context, p Plan, t router.Transport, emit func(Event), load
 		begin("ui")
 		mutating = true
 		if _, ok := fresh.Config("/opt/etc/init.d/S99xkeen-ui"); ok {
-			if _, err = command(ctx, t, "/opt/etc/init.d/S99xkeen-ui start"); err != nil {
+			if _, err = command(ctx, t, serviceLaunch("/opt/etc/init.d/S99xkeen-ui start")); err != nil {
 				return fail()
 			}
 			if _, err = command(ctx, t, "/opt/etc/init.d/S99xkeen-ui status"); err != nil {
@@ -427,3 +432,8 @@ func runtimeVersion(a catalog.Artifact) string {
 	}
 	return a.Version
 }
+
+// Redirect before entering init: a successfully backgrounded daemon must not
+// inherit SSH streams and keep Session.Run waiting after init returns. There is
+// no extra '&' or detach wrapper; the foreground init exit status is preserved.
+func serviceLaunch(fixedCommand string) string { return fixedCommand + " </dev/null >/dev/null 2>&1" }
