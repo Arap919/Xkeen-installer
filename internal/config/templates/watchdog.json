@@ -1,0 +1,32 @@
+{
+  "controller": "http://127.0.0.1:9090",
+  "secret": "",
+  "target_group": "",
+  "benchmark_group": "BENCHMARK",
+  "benchmark_proxy": "http://127.0.0.1:17890",
+  "top_n": 7,
+  "healthcheck_parallelism": 6,
+  "healthcheck_timeout_ms": 5000,
+  "speed_connect_timeout_seconds": 5,
+  "switch_wait_seconds": 0.7,
+  "_comment_speed_test_provider": "Allowed values: cloudflare, speedtest.",
+  "speed_test_provider": "cloudflare",
+  "download_bytes": 25000000,
+  "parallel_streams": 4,
+  "multi_rounds": 2,
+  "log_cleanup_days": 3,
+  "schedule": {
+    "windows": [
+      {
+        "start": "07:00",
+        "end": "01:00",
+        "every_minutes": 1
+      },
+      {
+        "start": "01:00",
+        "end": "07:00",
+        "every_minutes": 30
+      }
+    ]
+  }
+}

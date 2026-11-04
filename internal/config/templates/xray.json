@@ -1,0 +1,8 @@
+{
+  "log": {"loglevel": "warning"},
+  "inbounds": [{"tag":"transparent-in", "listen":"0.0.0.0", "port":50080,
+    "protocol":"dokodemo-door", "settings":{"network":"tcp,udp", "followRedirect":true},
+    "streamSettings":{"sockopt":{"tproxy":"tproxy"}},
+    "sniffing":{"enabled":true,"destOverride":["http","tls"]}}],
+  "outbounds": [{"tag":"blocked-until-configured", "protocol":"blackhole", "settings":{}}]
+}
