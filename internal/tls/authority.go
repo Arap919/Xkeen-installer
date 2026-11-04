@@ -59,13 +59,29 @@ func readPrivate(r *os.Root, name string) ([]byte, error) {
 	return b, nil
 }
 
-// Save never overwrites a pre-existing authority or certificate. Partial stores
-// fail closed; callers can select a new private location after reviewing them.
-func (p TLSProposal) Save(dir string) error {
+// Save never overwrites different pre-existing authority or certificate bytes.
+// Deployment evidence is granted only after the platform persistence contract
+// succeeds; incomplete writes and sync failures never grant that evidence.
+func (p TLSProposal) Save(dir string) error { return p.save(dir, syncStore) }
+func (p TLSProposal) save(dir string, sync func(*os.Root, string) error) error {
 	if p.private == nil {
 		return errStorage
 	}
-	r, e := openStore(dir, true)
+	p.private.storageMu.Lock()
+	p.private.storageDir = ""
+	p.private.storageMu.Unlock()
+	names := []string{"server.crt", "server.key"}
+	if len(p.private.ca) > 0 {
+		names = append(names, "ca.crt")
+	}
+	if len(p.private.caKey) > 0 {
+		names = append(names, "ca.key")
+	}
+	location, e := saveLocation(dir, names)
+	if e != nil {
+		return errStorage
+	}
+	r, e := openStore(location, true)
 	if e != nil {
 		return e
 	}
@@ -94,11 +110,11 @@ func (p TLSProposal) Save(dir string) error {
 		if _, e = r.Lstat(f.name); e == nil {
 			continue
 		}
-		out, e := r.OpenFile(f.name, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0600)
+		out, e := r.OpenFile(f.name, os.O_WRONLY|os.O_CREATE|os.O_EXCL|durableWriteFlags, 0600)
 		if e != nil {
 			return errStorage
 		}
-		if e = privatePath(filepath.Join(dir, f.name), false, true); e == nil {
+		if e = privatePath(filepath.Join(location, f.name), false, true); e == nil {
 			_, e = out.Write(f.data)
 		}
 		if e == nil {
@@ -109,12 +125,33 @@ func (p TLSProposal) Save(dir string) error {
 			return errStorage
 		}
 	}
+	if e = sync(r, location); e != nil {
+		return errStorage
+	}
+	for _, f := range files {
+		if len(f.data) == 0 {
+			continue
+		}
+		actual, e := readPrivate(r, f.name)
+		if e != nil || !bytes.Equal(actual, f.data) {
+			return errStorage
+		}
+	}
+	if e = r.Close(); e != nil {
+		return errStorage
+	}
+	if location != dir {
+		if e = publishStore(location, dir); e != nil {
+			return errStorage
+		}
+	}
 	p.private.storageMu.Lock()
 	p.private.storageDir = dir
 	p.private.storageMu.Unlock()
 	return nil
 }
-func Load(dir, address string) (TLSProposal, error) {
+func Load(dir, address string) (TLSProposal, error) { return load(dir, address, syncStore) }
+func load(dir, address string, sync func(*os.Root, string) error) (TLSProposal, error) {
 	r, e := openStore(dir, false)
 	if e != nil {
 		return TLSProposal{}, e
@@ -146,11 +183,21 @@ func Load(dir, address string) (TLSProposal, error) {
 		}
 	}
 	if len(p.private.caKey) > 0 {
-		if _, e := stdtls.X509KeyPair(p.private.ca, p.private.caKey); e != nil {
+		if !privateKeyOnly(p.private.caKey) {
+			return TLSProposal{}, errStorage
+		}
+		if _, e := stdtls.X509KeyPair(p.private.ca, bytes.TrimSpace(p.private.caKey)); e != nil {
 			return TLSProposal{}, errStorage
 		}
 	}
-	p.private.storageDir = dir
+	if len(p.private.caKey) > 0 {
+		if e = r.Close(); e != nil {
+			return TLSProposal{}, errStorage
+		}
+		if e = p.save(dir, sync); e != nil {
+			return TLSProposal{}, e
+		}
+	}
 	return p, nil
 }
 
@@ -175,6 +222,31 @@ func (p TLSProposal) ReadyForDeployment() error {
 	}
 	if !bytes.Equal(stored.private.caKey, p.private.caKey) || !bytes.Equal(stored.private.ca, p.private.ca) || !bytes.Equal(stored.private.cert, p.private.cert) || !bytes.Equal(stored.private.key, p.private.key) {
 		return errStorage
+	}
+	return nil
+}
+
+// Existing identical entries are flushed too: a previous failed save may have
+// left complete bytes without finishing metadata persistence.
+func syncStoreFiles(r *os.Root) error {
+	for _, name := range []string{"ca.crt", "ca.key", "server.crt", "server.key"} {
+		if _, e := r.Lstat(name); errors.Is(e, fs.ErrNotExist) {
+			continue
+		} else if e != nil {
+			return errStorage
+		}
+		if _, e := readPrivate(r, name); e != nil {
+			return errStorage
+		}
+		f, e := r.OpenFile(name, os.O_WRONLY|durableWriteFlags, 0)
+		if e != nil {
+			return errStorage
+		}
+		e = f.Sync()
+		ce := f.Close()
+		if e != nil || ce != nil {
+			return errStorage
+		}
 	}
 	return nil
 }

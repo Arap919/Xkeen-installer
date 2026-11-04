@@ -162,3 +162,43 @@ func TestUnsafeStoragePermissions(t *testing.T) {
 		t.Fatal("open store accepted")
 	}
 }
+
+func TestStoreDirectorySyncFailureCannotMintEvidence(t *testing.T) {
+	p, _ := PrepareTLS("router.test", TLSState{})
+	dir := filepath.Join(t.TempDir(), "ca")
+	calls := 0
+	failSync := func(r *os.Root, path string) error {
+		calls++
+		if path != dir {
+			t.Error("wrong sync directory")
+		}
+		for _, name := range []string{"ca.crt", "ca.key", "server.crt", "server.key"} {
+			if _, e := r.Lstat(name); e != nil {
+				t.Error("sync before file entries", name)
+			}
+		}
+		return errors.New("sync failed")
+	}
+	if e := p.save(dir, failSync); e == nil {
+		t.Fatal("failed directory sync accepted")
+	}
+	if calls != 1 || p.private.storageDir != "" || p.ReadyForDeployment() == nil {
+		t.Fatal("failed save minted evidence")
+	}
+	if _, e := load(dir, "router.test", failSync); e == nil {
+		t.Fatal("load bypassed failed directory sync")
+	}
+	if e := p.save(dir, failSync); e == nil {
+		t.Fatal("repeated save bypassed sync")
+	}
+	if e := p.Save(dir); e != nil {
+		t.Fatal(e)
+	}
+	if e := p.save(dir, failSync); e == nil || p.private.storageDir != "" || p.ReadyForDeployment() == nil {
+		t.Fatal("failed resave retained prior evidence")
+	}
+	q, e := Load(dir, "router.test")
+	if e != nil || q.ReadyForDeployment() != nil {
+		t.Fatal("successful durable retry", e)
+	}
+}

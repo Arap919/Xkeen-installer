@@ -155,3 +155,31 @@ func TestGeneratedCARequiresPrivatePersistence(t *testing.T) {
 		t.Fatal("lost CA key accepted")
 	}
 }
+
+func TestExistingExtraKeyPEMRejectedWithoutOverwrite(t *testing.T) {
+	f := fixture()
+	original, _ := localtls.PrepareTLS("router.test", localtls.TLSState{})
+	cert, key, _ := original.ServerPair()
+	extra, _ := localtls.PrepareTLS("other.test", localtls.TLSState{})
+	_, extraKey, _ := extra.ServerPair()
+	unsafe := append(append([]byte(nil), key...), extraKey...)
+	f.files[serverCertPath] = cert
+	f.files[serverKeyPath] = unsafe
+	f.files["/opt/etc/init.d/S99xkeen-ui"] = newUIInit(true)
+	if _, e := localtls.PrepareTLS("router.test", localtls.ExistingTLS(cert, unsafe, original.PublicCA())); e == nil {
+		t.Fatal("extra private key accepted")
+	}
+	safe, _ := localtls.PrepareTLS("router.test", localtls.ExistingTLS(cert, key, nil))
+	snapshot, e := router.Inspect(context.Background(), f)
+	if e != nil {
+		t.Fatal(e)
+	}
+	selection := Selection{Config: config.Selection{Cores: []catalog.Component{catalog.Xray}}, UI: true}
+	proposal, _ := config.Prepare(snapshot, selection.Config, config.Import{})
+	if _, e = BuildPlanWithTLS(snapshot, selection, proposal, safe); e == nil {
+		t.Fatal("invalid existing pair silently replaced")
+	}
+	if f.writes != 0 || !bytes.Equal(f.files[serverKeyPath], unsafe) || !bytes.Equal(f.files[serverCertPath], cert) {
+		t.Fatal("existing TLS overwritten")
+	}
+}

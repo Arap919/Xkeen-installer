@@ -6,8 +6,11 @@ import (
 	"crypto/elliptic"
 	"crypto/rand"
 	"crypto/x509"
+	"crypto/x509/pkix"
+	"encoding/asn1"
 	"encoding/json"
 	"encoding/pem"
+	"errors"
 	"fmt"
 	"math/big"
 	"strings"
@@ -71,5 +74,92 @@ func TestWrongKeyEKUAndSecretBoundaries(t *testing.T) {
 	}
 	if _, e := PrepareTLS("router.test", ExistingTLS(cert, key, p.private.caKey)); e == nil {
 		t.Fatal("private CA public payload accepted")
+	}
+}
+
+func TestPrivateKeyPEMIsExactlyOneBlock(t *testing.T) {
+	p, _ := PrepareTLS("router.test", TLSState{})
+	cert, key, _ := p.ServerPair()
+	cases := map[string][]byte{
+		"malformed-first-block":  append([]byte("-----BEGIN PRIVATE KEY-----\nmalformed\n"), key...),
+		"CA-key-appended":        append(clone(key), p.private.caKey...),
+		"duplicate-key":          append(clone(key), key...),
+		"trailing-data":          append(clone(key), []byte("private trailing data")...),
+		"prefix-data":            append([]byte("private prefix data\n"), key...),
+		"certificate-appended":   append(clone(key), cert...),
+		"malformed-second-block": append(clone(key), []byte("-----BEGIN PRIVATE KEY-----\nmalformed")...),
+	}
+	for name, data := range cases {
+		t.Run(name, func(t *testing.T) {
+			if ValidatePair("router.test", cert, data, time.Now()) == nil {
+				t.Error("extra key data accepted")
+			}
+			q, e := PrepareTLS("router.test", ExistingTLS(cert, data, p.PublicCA()))
+			if e == nil {
+				t.Errorf("unsafe existing key preserved as %v", q)
+			}
+			var invalid *StateError
+			if !errors.As(e, &invalid) || invalid.State != Invalid {
+				t.Error("expected typed invalid state")
+			}
+			if e != nil && strings.Contains(e.Error(), "PRIVATE KEY") {
+				t.Error("secret diagnostic")
+			}
+		})
+	}
+	parsedBlock, _ := pem.Decode(key)
+	parsedKey, e := x509.ParsePKCS8PrivateKey(parsedBlock.Bytes)
+	if e != nil {
+		t.Fatal(e)
+	}
+	ecDER, e := x509.MarshalECPrivateKey(parsedKey.(*ecdsa.PrivateKey))
+	if e != nil {
+		t.Fatal(e)
+	}
+	ecPEM := pem.EncodeToMemory(&pem.Block{Type: "EC PRIVATE KEY", Bytes: ecDER})
+	if ValidatePair("router.test", cert, ecPEM, time.Now()) != nil {
+		t.Fatal("valid SEC1 key rejected")
+	}
+	padded := append([]byte(" \n\t"), key...)
+	padded = append(padded, []byte("\r\n \t")...)
+	q, e := PrepareTLS("router.test", ExistingTLS(cert, padded, nil))
+	if e != nil {
+		t.Fatal(e)
+	}
+	_, got, _ := q.ServerPair()
+	if !bytes.Equal(got, padded) {
+		t.Fatal("valid exact key bytes changed")
+	}
+}
+
+func TestPrivateKeyDERHasNoAdditionalValues(t *testing.T) {
+	p, _ := PrepareTLS("router.test", TLSState{})
+	cert, key, _ := p.ServerPair()
+	block, _ := pem.Decode(key)
+	ca, _ := pem.Decode(p.private.caKey)
+	top := pem.EncodeToMemory(&pem.Block{Type: block.Type, Bytes: append(clone(block.Bytes), ca.Bytes...)})
+	var container struct {
+		Version    int
+		Algorithm  pkix.AlgorithmIdentifier
+		PrivateKey []byte
+	}
+	if _, e := asn1.Unmarshal(block.Bytes, &container); e != nil {
+		t.Fatal(e)
+	}
+	container.PrivateKey = append(container.PrivateKey, ca.Bytes...)
+	nestedDER, e := asn1.Marshal(container)
+	if e != nil {
+		t.Fatal(e)
+	}
+	nested := pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: nestedDER})
+	for name, data := range map[string][]byte{"outer-DER": top, "nested-PKCS8-DER": nested} {
+		t.Run(name, func(t *testing.T) {
+			if ValidatePair("router.test", cert, data, time.Now()) == nil {
+				t.Fatal("additional DER private key accepted")
+			}
+			if _, e := PrepareTLS("router.test", ExistingTLS(cert, data, nil)); e == nil {
+				t.Fatal("extra DER preserved")
+			}
+		})
 	}
 }

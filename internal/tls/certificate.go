@@ -9,6 +9,7 @@ import (
 	stdtls "crypto/tls"
 	"crypto/x509"
 	"crypto/x509/pkix"
+	"encoding/asn1"
 	"encoding/json"
 	"encoding/pem"
 	"errors"
@@ -118,10 +119,10 @@ func validAddress(a string) bool {
 }
 func ValidatePair(address string, cert, key []byte, now time.Time) error {
 	fail := func() error { return &StateError{Invalid} }
-	if !validAddress(address) || !certificatesOnly(cert) {
+	if !validAddress(address) || !certificatesOnly(cert) || !privateKeyOnly(key) {
 		return fail()
 	}
-	pair, e := stdtls.X509KeyPair(cert, key)
+	pair, e := stdtls.X509KeyPair(cert, bytes.TrimSpace(key))
 	if e != nil || len(pair.Certificate) == 0 {
 		return fail()
 	}
@@ -223,7 +224,7 @@ func certificatesOnly(data []byte) bool {
 			return false
 		}
 		b, rest := pem.Decode(data)
-		if b == nil || b.Type != "CERTIFICATE" || len(b.Headers) != 0 {
+		if b == nil || b.Type != "CERTIFICATE" || len(b.Headers) != 0 || bytes.Count(data[:len(data)-len(rest)], []byte("-----BEGIN ")) != 1 {
 			return false
 		}
 		if _, e := x509.ParseCertificate(b.Bytes); e != nil {
@@ -233,4 +234,37 @@ func certificatesOnly(data []byte) bool {
 		data = rest
 	}
 	return count > 0
+}
+
+// Private-key input must be exactly one supported PEM block. X509KeyPair alone
+// ignores surrounding data and additional blocks, which could contain a CA key.
+func privateKeyOnly(data []byte) bool {
+	data = bytes.TrimSpace(data)
+	block, rest := pem.Decode(data)
+	if block == nil || len(block.Headers) != 0 || len(bytes.TrimSpace(rest)) != 0 || bytes.Count(data[:len(data)-len(rest)], []byte("-----BEGIN ")) != 1 || !oneASN1Value(block.Bytes) {
+		return false
+	}
+	switch block.Type {
+	case "PRIVATE KEY":
+		var container struct {
+			Version    int
+			Algorithm  pkix.AlgorithmIdentifier
+			PrivateKey []byte
+		}
+		if _, e := asn1.Unmarshal(block.Bytes, &container); e != nil || !oneASN1Value(container.PrivateKey) {
+			return false
+		}
+	case "RSA PRIVATE KEY", "EC PRIVATE KEY":
+	default:
+		return false
+	}
+	return bytes.HasPrefix(data, []byte("-----BEGIN "+block.Type+"-----"))
+}
+
+// x509 parsers can ignore trailing DER. Bound both the outer key and PKCS8's
+// nested PrivateKey value without discarding legitimate optional attributes.
+func oneASN1Value(der []byte) bool {
+	var raw asn1.RawValue
+	rest, e := asn1.Unmarshal(der, &raw)
+	return e == nil && len(rest) == 0 && len(raw.FullBytes) == len(der)
 }
