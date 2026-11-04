@@ -47,13 +47,17 @@ func providerURL(raw string) error {
 }
 func group(m map[string]any, name string) map[string]any {
 	a, _ := m["proxy-groups"].([]any)
+	var found map[string]any
 	for _, v := range a {
 		g, _ := v.(map[string]any)
 		if g["name"] == name {
-			return g
+			if found != nil {
+				return nil
+			}
+			found = g
 		}
 	}
-	return nil
+	return found
 }
 func providerNames(m map[string]any, g map[string]any) ([]string, bool) {
 	a, _ := g["use"].([]any)
@@ -93,6 +97,13 @@ func watchdogContract(m map[string]any) (string, string, string, bool) {
 	bench := group(m, "BENCHMARK")
 	if target["type"] != "select" || bench["type"] != "select" {
 		return "", "", "", false
+	}
+	for _, g := range []map[string]any{target, bench} {
+		for _, key := range []string{"filter", "exclude-filter", "exclude-type", "include-all", "include-all-providers", "include-all-proxies"} {
+			if _, exists := g[key]; exists {
+				return "", "", "", false
+			}
+		}
 	}
 	a, ok := providerNames(m, target)
 	b, bok := providerNames(m, bench)

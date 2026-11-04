@@ -132,7 +132,11 @@ func TestExistingFilesPreservedAndActiveCoreRetained(t *testing.T) {
 			if len(p.Conflicts) == 0 {
 				t.Fatal("missing manual additions")
 			}
-			if p.Conflicts[0].NecessaryAddition == "" {
+			addition := false
+			for _, c := range p.Conflicts {
+				addition = addition || c.NecessaryAddition != ""
+			}
+			if !addition {
 				t.Fatal("missing exact addition")
 			}
 		})
@@ -185,7 +189,7 @@ func TestEmptyProviderAndConflictingPortBlockWatchdog(t *testing.T) {
 }
 
 func TestCompatibleAnchorsEnableWatchdogWithoutRewriting(t *testing.T) {
-	raw := []byte("external-controller: 127.0.0.1:9090\nsecret: PRIVATE_API_SECRET\nproxy-providers:\n  source: {type: http, url: 'https://example.invalid/PRIVATE_URL'}\nproxy-groups:\n  - {name: PROXY, type: select, use: &sources [source]}\n  - {name: BENCHMARK, type: select, use: *sources}\nlisteners:\n  - {name: benchmark-in, type: http, listen: 127.0.0.1, port: 17890, proxy: BENCHMARK, users: []}\n")
+	raw := []byte("port: 7890\nrules: [\"MATCH,PROXY\"]\nexternal-controller: 127.0.0.1:9090\nsecret: PRIVATE_API_SECRET\nproxy-providers:\n  source: {type: http, url: 'https://example.invalid/PRIVATE_URL'}\nproxy-groups:\n  - {name: PROXY, type: select, use: &sources [source]}\n  - {name: BENCHMARK, type: select, use: *sources}\nlisteners:\n  - {name: benchmark-in, type: http, listen: 127.0.0.1, port: 17890, proxy: BENCHMARK, users: []}\n")
 	p, e := Prepare(snapshot(t, "mihomo", map[string][]byte{MihomoPath: raw}), Selection{Cores: []catalog.Component{catalog.Mihomo}, Watchdog: true}, Import{})
 	if e != nil || !p.WatchdogEnabled {
 		t.Fatalf("contract failed: %v %+v", e, p)

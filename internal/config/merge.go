@@ -118,6 +118,19 @@ func Prepare(s router.Snapshot, selection Selection, input Import) (ConfigPropos
 			p.add(XrayPath, b, "create")
 		}
 	}
+	for _, f := range p.Files {
+		if f.Path == WatchdogPath {
+			continue
+		}
+		core := "xray"
+		if strings.HasPrefix(f.Path, "/opt/etc/mihomo/") {
+			core = "mihomo"
+		}
+		b, _ := p.File(f.Path)
+		if !coreStructure(core, b) {
+			p.conflict(f.Path, "Core configuration has insufficient or unsupported structure; manual and native validation required.", "")
+		}
+	}
 	if selection.Watchdog {
 		b, ok := p.File(MihomoPath)
 		var m map[string]any
@@ -134,7 +147,7 @@ func Prepare(s router.Snapshot, selection Selection, input Import) (ConfigPropos
 				var a, w map[string]any
 				_ = json.Unmarshal(old, &a)
 				_ = json.Unmarshal(desired, &w)
-				compatible = true
+				compatible = watchdogSettings(old)
 				for _, k := range []string{"controller", "secret", "target_group", "benchmark_group", "benchmark_proxy"} {
 					if a[k] != w[k] {
 						compatible = false
