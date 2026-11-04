@@ -383,3 +383,18 @@ func (t *SSHTransport) sftpWriteAtomic(ctx context.Context, p string, data []byt
 		return nil
 	})
 }
+
+// DialContext forwards a bounded TCP probe through the authenticated connection.
+// Credentials are HTTP headers in Go, never interpolated into shell commands.
+func (t *SSHTransport) DialContext(ctx context.Context, network, address string) (net.Conn, error) {
+	if network != "tcp" {
+		return nil, errors.New("unsupported probe network")
+	}
+	bounded, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	conn, err := t.client.DialContext(bounded, network, address)
+	if err != nil {
+		return nil, errors.New("SSH probe forwarding unavailable")
+	}
+	return conn, nil
+}

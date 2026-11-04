@@ -10,6 +10,7 @@ import (
 	"github.com/Arap919/xkeen-installer/internal/catalog"
 	"github.com/Arap919/xkeen-installer/internal/config"
 	"github.com/Arap919/xkeen-installer/internal/router"
+	localtls "github.com/Arap919/xkeen-installer/internal/tls"
 )
 
 var (
@@ -43,6 +44,7 @@ type Plan struct {
 	confirmed    bool
 }
 type planData struct {
+	tls              localtls.TLSProposal
 	preview          string
 	fingerprint      [32]byte
 	snapshot         router.Snapshot

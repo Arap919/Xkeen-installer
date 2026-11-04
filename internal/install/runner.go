@@ -14,6 +14,7 @@ import (
 	"github.com/Arap919/xkeen-installer/internal/catalog"
 	"github.com/Arap919/xkeen-installer/internal/config"
 	"github.com/Arap919/xkeen-installer/internal/router"
+	localtls "github.com/Arap919/xkeen-installer/internal/tls"
 )
 
 type loader func(context.Context, []catalog.Artifact) ([]payload, error)
@@ -31,6 +32,9 @@ func run(ctx context.Context, p Plan, t router.Transport, emit func(Event), load
 	}
 	if !d.used.CompareAndSwap(false, true) {
 		return r, ErrConsumed
+	}
+	if d.tls.Status() != localtls.Missing && d.tls.ReadyForDeployment() != nil {
+		return r, errors.New("Закрытое локальное хранилище CA недоступно; повторите подготовку TLS")
 	}
 	r.Pending = append([]string(nil), d.pending...)
 	step := "download"
@@ -321,6 +325,35 @@ func run(ctx context.Context, p Plan, t router.Transport, emit func(Event), load
 		}
 		done()
 	}
+	if d.selection.UI && d.tls.Status() != localtls.Missing {
+		begin("tls")
+		cert, key, ok := d.tls.ServerPair()
+		if !ok || localtls.ValidatePair(d.tls.Address(), cert, key, time.Now()) != nil {
+			return fail()
+		}
+		for _, f := range []payload{{path: serverCertPath, data: cert, mode: 0600}, {path: serverKeyPath, data: key, mode: 0600}} {
+			if existing, exists := fresh.Config(f.path); exists {
+				if !bytes.Equal(existing, f.data) {
+					return fail()
+				}
+				continue
+			}
+			if _, e := t.Stat(ctx, f.path); !errors.Is(e, fs.ErrNotExist) {
+				return fail()
+			}
+			mutating = true
+			if err = write(f); err != nil {
+				return fail()
+			}
+		}
+		actualCert, ce := t.Read(ctx, serverCertPath)
+		actualKey, ke := t.Read(ctx, serverKeyPath)
+		if ce != nil || ke != nil || localtls.ValidatePair(d.tls.Address(), actualCert, actualKey, time.Now()) != nil {
+			return fail()
+		}
+		r.Pending = append(r.Pending, "Проверьте фактический HTTPS API и системное доверие CA отдельно; готовность PWA ещё не подтверждена")
+		done()
+	}
 	if d.selection.UI {
 		begin("ui")
 		mutating = true
@@ -332,11 +365,20 @@ func run(ctx context.Context, p Plan, t router.Transport, emit func(Event), load
 				return fail()
 			}
 		} else {
-			init := []byte("#!/bin/sh\nENABLED=no\nPROCS=xkeen-ui\nARGS=\"-p 1000\"\nPREARGS=\"\"\nDESC=\"$PROCS\"\nPATH=/opt/sbin:/opt/bin:/usr/sbin:/usr/bin:/sbin:/bin\n. /opt/etc/init.d/rc.func\n")
+			init := newUIInit(d.tls.Status() != localtls.Missing)
 			if err = write(payload{path: "/opt/etc/init.d/S99xkeen-ui", data: init, mode: 0755}); err != nil {
 				return fail()
 			}
-			r.Pending = append(r.Pending, "Панель установлена без запуска; настройка TLS и проверка HTTPS/PWA ещё не выполнены")
+			if d.tls.Status() == localtls.Missing {
+				r.Pending = append(r.Pending, "Панель установлена без запуска; настройка TLS и проверка HTTPS/PWA ещё не выполнены")
+			} else {
+				if _, err = command(ctx, t, serviceLaunch("/opt/etc/init.d/S99xkeen-ui start")); err != nil {
+					return fail()
+				}
+				if _, err = command(ctx, t, "/opt/etc/init.d/S99xkeen-ui status"); err != nil {
+					return fail()
+				}
+			}
 		}
 		done()
 	}
