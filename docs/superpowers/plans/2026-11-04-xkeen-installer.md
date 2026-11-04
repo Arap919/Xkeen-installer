@@ -74,11 +74,13 @@
 
 **Интерфейсы:** `BuildPlan(snapshot Snapshot, selection Selection, proposal ConfigProposal) (Plan, error)`; `Run(ctx, plan Plan, transport Transport, emit func(Event)) (Report, error)`.
 
-- [ ] Написать тесты порядка backup→install→validate→activate, отказа исполнения устаревшего плана, отмены, обрыва SSH после мутации и повторного запуска.
-- [ ] Реализовать последовательные шаги с перепроверкой состояния. Фиксировать реально завершённые изменения и не обещать rollback opkg.
-- [ ] Использовать upstream noninteractive XKeen contract, штатный IPK watchdog и сохраняющий данные adapter UI вместо интерактивного uninstall/setup.sh.
-- [ ] Проверять контрольные суммы по доступному контракту, права файлов и версии. Не обновлять все пакеты Entware без включения этого действия в показанный план.
-- [ ] Проверить `go test ./internal/install` на изолированных fake-router сценариях clean/existing/both/cancel/retry.
+- [x] Написать тесты порядка backup→install→validate→activate, отказа исполнения устаревшего плана, отмены, обрыва SSH после мутации и повторного запуска.
+- [x] Реализовать последовательные шаги с перепроверкой состояния. Фиксировать реально завершённые изменения и не обещать rollback opkg.
+- [x] Использовать upstream noninteractive XKeen contract, штатный IPK watchdog и сохраняющий данные adapter UI вместо интерактивного uninstall/setup.sh.
+- [x] Проверять контрольные суммы по доступному контракту, права файлов и версии. Не обновлять все пакеты Entware без включения этого действия в показанный план.
+- [x] Проверить `go test ./internal/install` на изолированных fake-router сценариях clean/existing/both/cancel/retry.
+
+Результат задачи 4: реализация и независимое ревью завершены (`89b5ab9`, `3b43a8b`). Финальные `go test ./...`, `go vet ./...`, `git diff --check` проходят. Вместо полного установщика XKeen с побочными действиями над cron используется контролируемое развёртывание проверенных файлов и штатного init. Проверка на реальном роутере не выполнялась; новый UI ожидает HTTPS из задачи 5.
 
 ### Задача 5: HTTPS и проверка служб
 
