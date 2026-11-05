@@ -169,8 +169,12 @@ func TestStoreDirectorySyncFailureCannotMintEvidence(t *testing.T) {
 	calls := 0
 	failSync := func(r *os.Root, path string) error {
 		calls++
-		if path != dir {
-			t.Error("wrong sync directory")
+		if runtime.GOOS != "windows" {
+			if path != dir {
+				t.Error("wrong sync directory")
+			}
+		} else if path != dir && (filepath.Dir(path) != filepath.Dir(dir) || !strings.HasPrefix(filepath.Base(path), ".xkeen-ca-stage-")) {
+			t.Error("wrong Windows staging directory")
 		}
 		for _, name := range []string{"ca.crt", "ca.key", "server.crt", "server.key"} {
 			if _, e := r.Lstat(name); e != nil {

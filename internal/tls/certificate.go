@@ -244,18 +244,7 @@ func privateKeyOnly(data []byte) bool {
 	if block == nil || len(block.Headers) != 0 || len(bytes.TrimSpace(rest)) != 0 || bytes.Count(data[:len(data)-len(rest)], []byte("-----BEGIN ")) != 1 || !oneASN1Value(block.Bytes) {
 		return false
 	}
-	switch block.Type {
-	case "PRIVATE KEY":
-		var container struct {
-			Version    int
-			Algorithm  pkix.AlgorithmIdentifier
-			PrivateKey []byte
-		}
-		if _, e := asn1.Unmarshal(block.Bytes, &container); e != nil || !oneASN1Value(container.PrivateKey) {
-			return false
-		}
-	case "RSA PRIVATE KEY", "EC PRIVATE KEY":
-	default:
+	if !keyEnvelope(block.Type, block.Bytes) {
 		return false
 	}
 	return bytes.HasPrefix(data, []byte("-----BEGIN "+block.Type+"-----"))
@@ -267,4 +256,140 @@ func oneASN1Value(der []byte) bool {
 	var raw asn1.RawValue
 	rest, e := asn1.Unmarshal(der, &raw)
 	return e == nil && len(rest) == 0 && len(raw.FullBytes) == len(der)
+}
+
+// Check only field/tag envelopes which x509 struct decoders can silently ignore.
+// Key semantics stay with x509; legitimate PKCS8 attributes remain byte-exact.
+func asn1Parts(data []byte) ([]asn1.RawValue, bool) {
+	var fields []asn1.RawValue
+	for len(data) > 0 {
+		var field asn1.RawValue
+		rest, e := asn1.Unmarshal(data, &field)
+		if e != nil || len(rest) >= len(data) {
+			return nil, false
+		}
+		fields = append(fields, field)
+		data = rest
+	}
+	return fields, true
+}
+func universal(field asn1.RawValue, tag int) bool {
+	return field.Class == 0 && field.Tag == tag && field.IsCompound == (tag == asn1.TagSequence || tag == asn1.TagSet)
+}
+func keyFields(der []byte) ([]asn1.RawValue, bool) {
+	var outer asn1.RawValue
+	rest, e := asn1.Unmarshal(der, &outer)
+	if e != nil || len(rest) != 0 || !universal(outer, asn1.TagSequence) {
+		return nil, false
+	}
+	return asn1Parts(outer.Bytes)
+}
+func keyEnvelope(kind string, der []byte) bool {
+	fields, ok := keyFields(der)
+	if !ok {
+		return false
+	}
+	switch kind {
+	case "PRIVATE KEY":
+		if len(fields) < 3 || len(fields) > 4 || !universal(fields[0], asn1.TagInteger) || !universal(fields[1], asn1.TagSequence) || !universal(fields[2], asn1.TagOctetString) {
+			return false
+		}
+		if len(fields) == 4 {
+			attrs := fields[3]
+			if attrs.Class != 2 || attrs.Tag != 0 || !attrs.IsCompound {
+				return false
+			}
+			entries, ok := asn1Parts(attrs.Bytes)
+			if !ok {
+				return false
+			}
+			for _, entry := range entries {
+				parts, ok := keyFields(entry.FullBytes)
+				if !ok || len(parts) != 2 || !universal(parts[0], asn1.TagOID) || !universal(parts[1], asn1.TagSet) {
+					return false
+				}
+				values, ok := asn1Parts(parts[1].Bytes)
+				if !ok || len(values) == 0 {
+					return false
+				}
+			}
+		}
+		algo, ok := keyFields(fields[1].FullBytes)
+		if !ok || len(algo) < 1 || len(algo) > 2 || !universal(algo[0], asn1.TagOID) {
+			return false
+		}
+		var oid asn1.ObjectIdentifier
+		if _, e := asn1.Unmarshal(algo[0].FullBytes, &oid); e != nil {
+			return false
+		}
+		switch {
+		case oid.Equal(asn1.ObjectIdentifier{1, 2, 840, 113549, 1, 1, 1}):
+			if len(algo) == 2 && (!universal(algo[1], asn1.TagNull) || len(algo[1].Bytes) != 0) {
+				return false
+			}
+			return keyEnvelope("RSA PRIVATE KEY", fields[2].Bytes)
+		case oid.Equal(asn1.ObjectIdentifier{1, 2, 840, 10045, 2, 1}):
+			return len(algo) == 2 && universal(algo[1], asn1.TagOID) && keyEnvelope("EC PRIVATE KEY", fields[2].Bytes)
+		case oid.Equal(asn1.ObjectIdentifier{1, 3, 101, 112}):
+			if len(algo) != 1 {
+				return false
+			}
+			values, ok := asn1Parts(fields[2].Bytes)
+			return ok && len(values) == 1 && universal(values[0], asn1.TagOctetString)
+		default:
+			return false
+		}
+	case "EC PRIVATE KEY":
+		if len(fields) < 2 || len(fields) > 4 || !universal(fields[0], asn1.TagInteger) || !universal(fields[1], asn1.TagOctetString) {
+			return false
+		}
+		last := -1
+		for _, field := range fields[2:] {
+			if field.Class != 2 || !field.IsCompound || field.Tag < 0 || field.Tag > 1 || field.Tag <= last {
+				return false
+			}
+			last = field.Tag
+			values, ok := asn1Parts(field.Bytes)
+			tag := asn1.TagOID
+			if field.Tag == 1 {
+				tag = asn1.TagBitString
+			}
+			if !ok || len(values) != 1 || !universal(values[0], tag) {
+				return false
+			}
+		}
+		return true
+	case "RSA PRIVATE KEY":
+		if len(fields) < 9 || len(fields) > 10 {
+			return false
+		}
+		for _, field := range fields[:9] {
+			if !universal(field, asn1.TagInteger) {
+				return false
+			}
+		}
+		if len(fields) == 10 {
+			if !universal(fields[9], asn1.TagSequence) {
+				return false
+			}
+			primes, ok := asn1Parts(fields[9].Bytes)
+			if !ok {
+				return false
+			}
+			for _, prime := range primes {
+				values, ok := keyFields(prime.FullBytes)
+				if !ok || len(values) != 3 {
+					return false
+				}
+				for _, value := range values {
+					if !universal(value, asn1.TagInteger) {
+						return false
+					}
+				}
+			}
+		}
+		return true
+	default:
+		return false
+	}
 }

@@ -5,6 +5,7 @@ import (
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"crypto/rand"
+	"crypto/rsa"
 	"crypto/x509"
 	"crypto/x509/pkix"
 	"encoding/asn1"
@@ -161,5 +162,111 @@ func TestPrivateKeyDERHasNoAdditionalValues(t *testing.T) {
 				t.Fatal("extra DER preserved")
 			}
 		})
+	}
+}
+
+func appendKeyField(t *testing.T, der, field []byte) []byte {
+	t.Helper()
+	var outer asn1.RawValue
+	if _, e := asn1.Unmarshal(der, &outer); e != nil {
+		t.Fatal(e)
+	}
+	out, e := asn1.Marshal(asn1.RawValue{Class: 0, Tag: asn1.TagSequence, IsCompound: true, Bytes: append(clone(outer.Bytes), field...)})
+	if e != nil {
+		t.Fatal(e)
+	}
+	return out
+}
+func TestKeySequenceFieldBoundaries(t *testing.T) {
+	p, _ := PrepareTLS("router.test", TLSState{})
+	cert, key, _ := p.ServerPair()
+	block, _ := pem.Decode(key)
+	ca, _ := pem.Decode(p.private.caKey)
+	parsed, _ := x509.ParsePKCS8PrivateKey(block.Bytes)
+	ec, _ := x509.MarshalECPrivateKey(parsed.(*ecdsa.PrivateKey))
+	badEC := appendKeyField(t, ec, ca.Bytes)
+	var nested struct {
+		Version    int
+		Algorithm  pkix.AlgorithmIdentifier
+		PrivateKey []byte
+	}
+	asn1.Unmarshal(block.Bytes, &nested)
+	nested.PrivateKey = badEC
+	badNested, _ := asn1.Marshal(nested)
+	for name, tc := range map[string]struct {
+		kind string
+		der  []byte
+	}{"PKCS8": {"PRIVATE KEY", appendKeyField(t, block.Bytes, ca.Bytes)}, "SEC1": {"EC PRIVATE KEY", badEC}, "nested-SEC1": {"PRIVATE KEY", badNested}} {
+		t.Run(name, func(t *testing.T) {
+			key := pem.EncodeToMemory(&pem.Block{Type: tc.kind, Bytes: tc.der})
+			if ValidatePair("router.test", cert, key, time.Now()) == nil {
+				t.Error("unrecognized key field accepted")
+			}
+			if _, e := PrepareTLS("router.test", ExistingTLS(cert, key, nil)); e == nil {
+				t.Error("unsafe field preserved")
+			}
+		})
+	}
+	rsaKey, e := rsa.GenerateKey(rand.Reader, 1024)
+	if e != nil {
+		t.Fatal(e)
+	}
+	rsaDER := x509.MarshalPKCS1PrivateKey(rsaKey)
+	badRSA := appendKeyField(t, appendKeyField(t, rsaDER, []byte{0x30, 0}), ca.Bytes)
+	rsaPKCS8, e := x509.MarshalPKCS8PrivateKey(rsaKey)
+	if e != nil {
+		t.Fatal(e)
+	}
+	asn1.Unmarshal(rsaPKCS8, &nested)
+	nested.PrivateKey = badRSA
+	badNestedRSA, e := asn1.Marshal(nested)
+	if e != nil {
+		t.Fatal(e)
+	}
+	for _, tc := range []struct {
+		kind string
+		der  []byte
+	}{{"RSA PRIVATE KEY", badRSA}, {"PRIVATE KEY", badNestedRSA}} {
+		if privateKeyOnly(pem.EncodeToMemory(&pem.Block{Type: tc.kind, Bytes: tc.der})) {
+			t.Error("unrecognized RSA key field accepted")
+		}
+	}
+	if !privateKeyOnly(pem.EncodeToMemory(&pem.Block{Type: "RSA PRIVATE KEY", Bytes: rsaDER})) {
+		t.Fatal("legitimate PKCS1 key rejected")
+	}
+}
+func TestPKCS8LegitimateAttributesPreserved(t *testing.T) {
+	p, _ := PrepareTLS("router.test", TLSState{})
+	cert, key, _ := p.ServerPair()
+	block, _ := pem.Decode(key)
+	oid, e := asn1.Marshal(asn1.ObjectIdentifier{1, 2, 840, 113549, 1, 9, 20})
+	if e != nil {
+		t.Fatal(e)
+	}
+	value, e := asn1.Marshal("router")
+	if e != nil {
+		t.Fatal(e)
+	}
+	values, e := asn1.Marshal(asn1.RawValue{Class: 0, Tag: asn1.TagSet, IsCompound: true, Bytes: value})
+	if e != nil {
+		t.Fatal(e)
+	}
+	attribute, e := asn1.Marshal(asn1.RawValue{Class: 0, Tag: asn1.TagSequence, IsCompound: true, Bytes: append(oid, values...)})
+	if e != nil {
+		t.Fatal(e)
+	}
+	attrs, e := asn1.Marshal(asn1.RawValue{Class: 2, Tag: 0, IsCompound: true, Bytes: attribute})
+	if e != nil {
+		t.Fatal(e)
+	}
+	der := appendKeyField(t, block.Bytes, attrs)
+	withAttrs := pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: der})
+	q, e := PrepareTLS("router.test", ExistingTLS(cert, withAttrs, nil))
+	if e != nil {
+		t.Fatal(e)
+	}
+	_, actual, _ := q.ServerPair()
+	if !bytes.Equal(actual, withAttrs) {
+		t.Fatal("legitimate attributes changed")
 	}
 }
