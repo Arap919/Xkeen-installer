@@ -4,5 +4,6 @@ credentials.json
 secrets/
 node_modules/
 frontend/dist/
+frontend/package.json.md5
 build/bin/
 .DS_Store
