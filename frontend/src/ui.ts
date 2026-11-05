@@ -24,6 +24,20 @@ export function mount(root:HTMLElement,w:Wizard){
  }
  function render(){
   root.innerHTML=`<div class="shell"><nav aria-label="Шаги установки"><div class="brand">XKeen<span>Установка и настройка</span></div><ol>${steps.map((s,i)=>`<li class="${i===w.step?'current':i<w.step?'done':''}" ${i===w.step?'aria-current="step"':''}><span>${i+1}</span>${s}</li>`).join('')}</ol><p>Настройки сохраняются.<br>Каждая запись — по плану.</p></nav><main><header><span>Шаг ${w.step+1} из 9</span><h1>${steps[w.step]}</h1></header><section>${screen()}${w.message?`<p class="error" role="alert">${escape(w.message)}</p>`:''}</section><footer><button class="secondary" data-action="back" ${w.step===0||w.running||w.busy?'disabled':''}>Назад</button><span>${w.busy?'Выполняется проверка…':w.running?'Установка в процессе':'Роутер изменяется только после подтверждения плана'}</span>${w.step<5?`<button data-action="next" ${w.busy||w.step===0&&!w.prepared||w.step===1&&!w.inspection||w.step===2&&!w.inspection?.Entware?'disabled':''}>Далее</button>`:''}</footer></main></div>${w.hostKey?`<dialog open aria-labelledby="host-title"><h2 id="host-title">${w.hostKey.Kind==='first-use'?'Первое подключение SSH':'Ключ SSH изменился'}</h2><p>Сравните отпечаток с известным ключом роутера через доверенный канал.</p><dl><dt>Адрес</dt><dd>${escape(w.hostKey.Address)}</dd><dt>Алгоритм</dt><dd>${escape(w.hostKey.Algorithm)}</dd></dl><code class="fingerprint">${escape(w.hostKey.Fingerprint)}</code>${w.hostKey.Expected?`<p>Ожидался: <code>${escape(w.hostKey.Expected)}</code></p>`:''}<div class="actions">${w.hostKey.Kind==='first-use'?'<button data-action="confirm-host">Отпечаток совпадает, подключиться</button>':'<p class="error">Автоматическая замена заблокирована.</p>'}<button class="secondary" data-action="reject-host">Отмена</button></div></dialog>`:''}${w.trust?`<dialog open aria-labelledby="trust-title"><h2 id="trust-title">Доверие сертификату CA</h2><p>${escape(w.trust.Description||w.trust.Manual)}</p><p>Это отдельное изменение системного хранилища доверия на этом компьютере.</p><div class="actions">${w.trust.ID?'<button data-action="apply-trust">Разрешаю установку этого CA</button>':''}<button class="secondary" data-action="reject-trust">Не устанавливать</button></div></dialog>`:''}`;
+  if(w.step===6&&w.plan?.Files?.length){
+   const previews=document.createElement('div');previews.className='file-previews';
+   const heading=document.createElement('h2');heading.textContent='Файлы конфигурации';previews.append(heading);
+   const note=document.createElement('p');note.textContent='Содержимое конфигураций скрыто; доступны пути, действия и обезличенный предпросмотр.';previews.append(note);
+   for(const file of w.plan.Files){
+    const details=document.createElement('details');details.open=true;
+    const summary=document.createElement('summary');
+    const action=({create:'Создать',preserve:'Сохранить без изменения'} as Record<string,string>)[file.Action]??file.Action;
+    summary.textContent=`${file.Path}: ${action}`;
+    const preview=document.createElement('pre');preview.textContent=file.Preview;
+    details.append(summary,preview);previews.append(details);
+   }
+   root.querySelector('.changes')?.after(previews);
+  }
   if(w.step===8){
    const back=root.querySelector<HTMLButtonElement>('[data-action="back"]');if(back)back.disabled=true;
    if(w.result?.Completed?.length||w.result?.Applied?.length){

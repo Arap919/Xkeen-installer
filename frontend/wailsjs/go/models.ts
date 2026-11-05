@@ -1,14 +1,14 @@
 export namespace config {
-	
+
 	export class Conflict {
 	    Path: string;
 	    Reason: string;
 	    NecessaryAddition: string;
-	
+
 	    static createFrom(source: any = {}) {
 	        return new Conflict(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.Path = source["Path"];
@@ -20,11 +20,11 @@ export namespace config {
 	    Path: string;
 	    Action: string;
 	    Preview: string;
-	
+
 	    static createFrom(source: any = {}) {
 	        return new FilePreview(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.Path = source["Path"];
@@ -36,16 +36,16 @@ export namespace config {
 }
 
 export namespace install {
-	
+
 	export class FileChange {
 	    Path: string;
 	    Action: string;
 	    Mode: string;
-	
+
 	    static createFrom(source: any = {}) {
 	        return new FileChange(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.Path = source["Path"];
@@ -56,11 +56,11 @@ export namespace install {
 	export class Step {
 	    ID: string;
 	    Description: string;
-	
+
 	    static createFrom(source: any = {}) {
 	        return new Step(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.ID = source["ID"];
@@ -71,15 +71,15 @@ export namespace install {
 }
 
 export namespace main {
-	
+
 	export class ArtifactView {
 	    Component: string;
 	    Version: string;
-	
+
 	    static createFrom(source: any = {}) {
 	        return new ArtifactView(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.Component = source["Component"];
@@ -91,11 +91,11 @@ export namespace main {
 	    Port: number;
 	    User: string;
 	    Password: string;
-	
+
 	    static createFrom(source: any = {}) {
 	        return new ConnectionRequest(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.Host = source["Host"];
@@ -110,11 +110,11 @@ export namespace main {
 	    Fingerprint: string;
 	    Expected: string;
 	    Algorithm: string;
-	
+
 	    static createFrom(source: any = {}) {
 	        return new HostKeyView(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.Kind = source["Kind"];
@@ -132,11 +132,11 @@ export namespace main {
 	    ActiveCore: string;
 	    Versions: Record<string, string>;
 	    HostKey?: HostKeyView;
-	
+
 	    static createFrom(source: any = {}) {
 	        return new InspectionView(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.ID = source["ID"];
@@ -147,7 +147,7 @@ export namespace main {
 	        this.Versions = source["Versions"];
 	        this.HostKey = this.convertValues(source["HostKey"], HostKeyView);
 	    }
-	
+
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
 		    if (!a) {
 		        return a;
@@ -175,11 +175,11 @@ export namespace main {
 	    ImportCore: string;
 	    ImportText: string;
 	    ProviderURL: string;
-	
+
 	    static createFrom(source: any = {}) {
 	        return new PlanRequest(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.InspectionID = source["InspectionID"];
@@ -202,11 +202,11 @@ export namespace main {
 	    Files: config.FilePreview[];
 	    Conflicts: config.Conflict[];
 	    Message: string;
-	
+
 	    static createFrom(source: any = {}) {
 	        return new PlanView(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.ID = source["ID"];
@@ -219,7 +219,7 @@ export namespace main {
 	        this.Conflicts = this.convertValues(source["Conflicts"], config.Conflict);
 	        this.Message = source["Message"];
 	    }
-	
+
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
 		    if (!a) {
 		        return a;
@@ -249,11 +249,11 @@ export namespace main {
 	    PanelURL: string;
 	    Services: verify.ServiceReport[];
 	    ReinspectRequired: boolean;
-	
+
 	    static createFrom(source: any = {}) {
 	        return new ResultView(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.Status = source["Status"];
@@ -267,7 +267,7 @@ export namespace main {
 	        this.Services = this.convertValues(source["Services"], verify.ServiceReport);
 	        this.ReinspectRequired = source["ReinspectRequired"];
 	    }
-	
+
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
 		    if (!a) {
 		        return a;
@@ -290,11 +290,11 @@ export namespace main {
 	    ID: string;
 	    Description: string;
 	    Manual: string;
-	
+
 	    static createFrom(source: any = {}) {
 	        return new TrustView(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.ID = source["ID"];
@@ -306,15 +306,15 @@ export namespace main {
 }
 
 export namespace tls {
-	
+
 	export class TrustResult {
 	    Status: string;
 	    Detail: string;
-	
+
 	    static createFrom(source: any = {}) {
 	        return new TrustResult(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.Status = source["Status"];
@@ -325,15 +325,15 @@ export namespace tls {
 }
 
 export namespace verify {
-	
+
 	export class Check {
 	    State: string;
 	    Detail: string;
-	
+
 	    static createFrom(source: any = {}) {
 	        return new Check(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.State = source["State"];
@@ -347,11 +347,11 @@ export namespace verify {
 	    API: Check;
 	    HTTPS: Check;
 	    Trust: Check;
-	
+
 	    static createFrom(source: any = {}) {
 	        return new ServiceReport(source);
 	    }
-	
+
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.Component = source["Component"];
@@ -361,7 +361,7 @@ export namespace verify {
 	        this.HTTPS = this.convertValues(source["HTTPS"], Check);
 	        this.Trust = this.convertValues(source["Trust"], Check);
 	    }
-	
+
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
 		    if (!a) {
 		        return a;
@@ -382,4 +382,3 @@ export namespace verify {
 	}
 
 }
-

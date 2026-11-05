@@ -49,7 +49,7 @@ export class Wizard{
   if(this.busy||this.running||!this.reviewed||!this.plan?.ID)return;this.busy=true;this.message='';
   const id=this.plan.ID;
   try{await this.backend.ConfirmPlan(id);this.running=true;this.step=7;await this.backend.StartInstall(id);this.connection.Password='';this.selection.ImportText='';this.selection.ProviderURL='';}
-  catch{this.running=false;this.message='Запуск заблокирован. Повторите проверку и подтвердите новый план.';this.plan=null;this.reviewed=false;}
+  catch{this.running=false;this.step=6;this.message='Запуск заблокирован. Повторите проверку и подтвердите новый план.';this.plan=null;this.reviewed=false;}
   finally{this.busy=false;}
  }
  async cancel(){await this.backend.CancelInstall();this.inspection=null;this.plan=null;this.reviewed=false;this.message='Отмена не откатывает выполненные записи. Дождитесь результата и повторите проверку.';}

@@ -17,6 +17,28 @@ function fixture() {
 }
 
 describe('wizard safety transitions',()=>{
+ it('renders each backend file preview as text before plan confirmation',async()=>{
+  const {wizard}=fixture();await wizard.inspect();await wizard.prepare();
+  const path='/opt/etc/mihomo/<preview>.yaml';
+  const preview='secret: <redacted>\n# <img src=x onerror="alert(1)">';
+  wizard.plan!.Files=[{Path:path,Action:'preserve',Preview:preview}];
+  const root=document.createElement('div');mount(root,wizard);
+  const rendered=root.querySelector('.file-previews pre')!;
+  expect(rendered?.textContent).toBe(preview);
+  expect(root.querySelector('.file-previews summary')?.textContent).toContain(path);
+  expect(root.querySelector('.file-previews img')).toBeNull();
+  expect(rendered.compareDocumentPosition(root.querySelector('#reviewed')!)&Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+ });
+ it('returns to plan review when the backend rejects installation start',async()=>{
+  const {wizard}=fixture();await wizard.inspect();await wizard.prepare();wizard.reviewed=true;
+  wizard.backend.StartInstall=async()=>{throw new Error('rejected');};
+  await wizard.start();
+  expect(wizard.step).toBe(6);expect(wizard.running).toBe(false);expect(wizard.plan).toBeNull();
+  const root=document.createElement('div');mount(root,wizard);
+  expect(root.querySelector('h1')?.textContent).toBe('План изменений');
+  expect(root.textContent).not.toContain('Выполняется подтверждённый план');
+  expect(root.querySelector('[data-action="start"]')).toBeNull();
+ });
  it('uses Russian progress labels while keeping backend event IDs internal',()=>{
   const {wizard}=fixture();wizard.step=7;wizard.running=true;wizard.progress=[{Step:'download',Status:'running',Message:''}];
   const root=document.createElement('div');mount(root,wizard);
