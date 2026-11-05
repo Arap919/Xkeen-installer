@@ -111,8 +111,8 @@
 
 **Файлы:** `README.md`, `docs/testing.md`, `.github/workflows/build.yml`, конфигурация упаковки Wails.
 
-- [ ] Подготовить сборки Windows amd64, macOS amd64/arm64 и Linux amd64 с учётом системного WebView. CI подготовить локально без публикации workflow/релизов.
-- [ ] Выполнить `go test ./...`, `go vet ./...`, frontend typecheck/tests/build, доступную desktop сборку.
-- [ ] Проверить всю цепочку с fixtures: clean Entware, missing Entware/manual fallback, existing custom configs, Xray only, Mihomo only, both, no space, network failure, cancel/retry.
-- [ ] Выполнить независимое ревью перед заявлением готовности; исправить находки в пределах утверждённого дизайна.
-- [ ] В README разделить проверенное на компьютере, проверенное в CI и ещё не проверенное на реальном роутере. Реальный deploy и публикация остаются отдельными действиями пользователя.
+- [x] Подготовить сборки Windows amd64, macOS amd64/arm64 и Linux amd64 с учётом системного WebView. CI подготовить локально без публикации workflow/релизов.
+- [x] Выполнить `go test ./...`, `go vet ./...`, frontend typecheck/tests/build, доступную desktop сборку.
+- [x] Проверить всю цепочку с fixtures: clean Entware, missing Entware/manual fallback, existing custom configs, Xray only, Mihomo only, both, no space, network failure, cancel/retry.
+- [x] Выполнить независимое ревью перед заявлением готовности; исправить находки в пределах утверждённого дизайна.
+- [x] В README разделить проверенное на компьютере, проверенное в CI и ещё не проверенное на реальном роутере. Реальный deploy и публикация остаются отдельными действиями пользователя.
