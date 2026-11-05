@@ -153,7 +153,7 @@ func TestServiceLaunchClosesInheritedStreamsAndPreservesStatus(t *testing.T) {
 		t.Skip("POSIX shell fixture unavailable")
 	}
 	f := fixture()
-	f.files["/opt/etc/init.d/S99xkeen-ui"] = []byte("#!/bin/sh\nPROCS=xkeen-ui\n. /opt/etc/init.d/rc.func\n")
+	f.files["/opt/etc/init.d/S99xkeen-ui"] = []byte("#!/bin/sh\nPROCS=xkeen-ui\nARGS=\"-p 1000\"\n. /opt/etc/init.d/rc.func\n")
 	s, _ := router.Inspect(context.Background(), f)
 	sel := Selection{Config: config.Selection{Cores: []catalog.Component{catalog.Xray}}, UI: true}
 	proposal, _ := config.Prepare(s, sel.Config, config.Import{})

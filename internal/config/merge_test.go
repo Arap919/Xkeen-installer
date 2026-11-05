@@ -240,3 +240,29 @@ func TestEmptyLocalImportRejected(t *testing.T) {
 		t.Fatal("empty local import accepted")
 	}
 }
+
+func TestRepeatPreparePreservesReferencedProviderCache(t *testing.T) {
+	sel := Selection{Cores: []catalog.Component{catalog.Mihomo}, ActiveCore: catalog.Mihomo, Watchdog: true}
+	initial, err := Prepare(snapshot(t, "", nil), sel, ProviderImport("https://example.invalid/sub"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	main, _ := initial.File(MihomoPath)
+	cache := []byte("# cached subscription\nproxies:\n  - {name: node, type: ss, server: example.invalid, port: 443, cipher: aes-128-gcm, password: private}\n")
+	files := map[string][]byte{MihomoPath: main, "/opt/etc/mihomo/providers/subscription.yaml": cache}
+	repeated, err := Prepare(snapshot(t, "mihomo", files), sel, Import{})
+	if err != nil || len(repeated.Conflicts) != 0 || !repeated.WatchdogEnabled {
+		t.Fatalf("repeat: %v %+v", err, repeated)
+	}
+	for name, want := range files {
+		got, ok := repeated.File(name)
+		if !ok || string(got) != string(want) {
+			t.Fatalf("changed %s", name)
+		}
+	}
+	files["/opt/etc/mihomo/unreferenced.yaml"] = cache
+	ambiguous, err := Prepare(snapshot(t, "mihomo", files), sel, Import{})
+	if err != nil || len(ambiguous.Conflicts) == 0 {
+		t.Fatal("unreferenced YAML must remain blocked")
+	}
+}

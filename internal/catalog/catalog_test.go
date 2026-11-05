@@ -91,9 +91,9 @@ func TestVerifyRejectsMetadataMismatch(t *testing.T) {
 		})
 	}
 }
-func TestVerifyPublishedWatchdogPayload(t *testing.T) {
-	// Independent fixture: the exact feed package is tested by an opt-in live read in the task report.
-	// Exercise the streaming verifier with the canonical metadata, not an injected expected digest.
+func TestVerifyRejectsInvalidWatchdogPayloads(t *testing.T) {
+	// Offline zero-filled, truncated and oversized fixtures exercise canonical
+	// metadata rejection; this test does not fetch or verify a published payload.
 	a, err := Resolve(Watchdog, MIPS)
 	if err != nil {
 		t.Fatal(err)

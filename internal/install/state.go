@@ -52,6 +52,7 @@ type planData struct {
 	configs          []payload
 	artifacts        []catalog.Artifact
 	active           catalog.Component
+	uiPort           int
 	existingInit     []byte
 	existingInitMode fs.FileMode
 	configuredCore   catalog.Component

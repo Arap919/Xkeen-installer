@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"regexp"
+	"strconv"
 	"strings"
 	"time"
 
@@ -138,6 +139,39 @@ func (p Plan) VerificationActiveCore() catalog.Component {
 }
 
 var uiArgsLine = regexp.MustCompile(`(?m)^ARGS="([^"\r\n]*)"$`)
+
+func plannedUIPort(s router.Snapshot) (int, bool, error) {
+	init, exists := s.Config("/opt/etc/init.d/S99xkeen-ui")
+	if !exists {
+		return 1000, false, nil
+	}
+	matches := uiArgsLine.FindAllSubmatch(init, -1)
+	if len(matches) != 1 {
+		return 0, true, errors.New("Порт существующей панели требует ручной проверки")
+	}
+	args := strings.Fields(string(matches[0][1]))
+	port, count := 0, 0
+	for i, arg := range args {
+		if strings.ContainsAny(arg, "$`\\;|&<>()") {
+			return 0, true, errors.New("Параметры панели требуют ручной проверки")
+		}
+		if arg == "--port" || strings.HasPrefix(arg, "--port=") || (strings.HasPrefix(arg, "-p") && arg != "-p") {
+			return 0, true, errors.New("Порт панели требует ручной проверки")
+		}
+		if arg != "-p" {
+			continue
+		}
+		count++
+		if i+1 >= len(args) {
+			break
+		}
+		port, _ = strconv.Atoi(args[i+1])
+	}
+	if count != 1 || port < 1 || port > 65535 {
+		return 0, true, errors.New("Порт существующей панели требует ручной проверки")
+	}
+	return port, true, nil
+}
 
 func knownUIArgs(init []byte) bool {
 	matches := uiArgsLine.FindAllSubmatch(init, -1)

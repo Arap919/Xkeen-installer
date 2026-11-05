@@ -7,6 +7,7 @@ import (
 	"io/fs"
 	"path"
 	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/Arap919/xkeen-installer/internal/catalog"
@@ -34,6 +35,8 @@ type Snapshot struct {
 	ActiveCoreEvidence string
 	contents           map[string][]byte
 	inspected          bool
+	ports              map[int][]string
+	portsKnown         bool
 }
 
 // Config returns a defensive copy for backend configuration preparation. JSON cannot expose it.
@@ -136,6 +139,19 @@ func Inspect(ctx context.Context, t Transport) (Snapshot, error) {
 				seen["mihomo"] = true
 			case "/opt/sbin/xray", "/opt/bin/xray":
 				seen["xray"] = true
+			case "mihomo", "xray":
+				pid, e := strconv.ParseUint(fields[0], 10, 32)
+				if e != nil || pid == 0 || strconv.FormatUint(pid, 10) != fields[0] {
+					continue
+				}
+				exe, e := processExecutable(ctx, t, fields[0])
+				if e != nil {
+					return Snapshot{}, e
+				}
+				core := fields[commandColumn]
+				if exe == "/opt/sbin/"+core || exe == "/opt/bin/"+core {
+					seen[core] = true
+				}
 			}
 		}
 
@@ -148,6 +164,9 @@ func Inspect(ctx context.Context, t Transport) (Snapshot, error) {
 		} else if len(seen) > 1 {
 			s.ActiveCoreEvidence = "multiple-core-processes"
 		}
+	}
+	if err := inspectPorts(ctx, t, &s); err != nil {
+		return Snapshot{}, err
 	}
 	s.Available, err = t.AvailableBytes(ctx, "/opt")
 	if err != nil {

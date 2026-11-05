@@ -93,6 +93,46 @@ func TestFixtureCustomMihomoPreservesAnchorsListenersAndBackup(t *testing.T) {
 	}
 }
 
+func TestFixtureRepeatProviderCachePlanAndBackup(t *testing.T) {
+	f := fixture()
+	delete(f.files, config.XrayPath)
+	f.active = "mihomo"
+	f.files["/opt/etc/init.d/S05xkeen"] = bytes.Replace(f.files["/opt/etc/init.d/S05xkeen"], []byte("xray"), []byte("mihomo"), 1)
+	sel := Selection{Config: config.Selection{Cores: []catalog.Component{catalog.Mihomo}, ActiveCore: catalog.Mihomo}}
+	initial, err := config.Prepare(router.Snapshot{}, sel.Config, config.ProviderImport("https://example.invalid/sub"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	main, _ := initial.File(config.MihomoPath)
+	cachePath := "/opt/etc/mihomo/providers/subscription.yaml"
+	cache := []byte("# existing cache\nproxies: [{name: node, type: ss, server: example.invalid, port: 443, cipher: aes-128-gcm, password: private}]\n")
+	f.files[config.MihomoPath], f.files[cachePath] = main, cache
+	f.modes[config.MihomoPath], f.modes[cachePath] = 0640, 0600
+	s, err := router.Inspect(context.Background(), f)
+	if err != nil {
+		t.Fatal(err)
+	}
+	proposal, err := config.Prepare(s, sel.Config, config.Import{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	p, err := BuildPlan(s, sel, proposal)
+	if err != nil {
+		t.Fatal(err)
+	}
+	report, err := run(context.Background(), confirm(t, p), f, nil, fixtureLoader)
+	if err != nil || !report.Complete || !report.Backup.Verified() {
+		t.Fatalf("report=%+v err=%v", report, err)
+	}
+	for name, want := range map[string][]byte{config.MihomoPath: main, cachePath: cache} {
+		for _, target := range []string{name, report.Backup.Root + name} {
+			if !bytes.Equal(f.files[target], want) || (name == config.MihomoPath && f.modes[target] != 0640) || (name == cachePath && f.modes[target] != 0600) {
+				t.Fatalf("bytes or mode changed: %s", target)
+			}
+		}
+	}
+}
+
 type scenarioSpace struct {
 	*fakeRouter
 	available uint64

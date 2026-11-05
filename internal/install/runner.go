@@ -106,6 +106,12 @@ func run(ctx context.Context, p Plan, t router.Transport, emit func(Event), load
 	if fp != d.fingerprint {
 		return r, ErrStale
 	}
+	if d.selection.UI {
+		_, existing := fresh.Config("/opt/etc/init.d/S99xkeen-ui")
+		if err = fresh.CheckUIPort(d.uiPort, existing); err != nil {
+			return fail()
+		}
+	}
 	if d.selection.Config.Watchdog {
 		v, e := command(ctx, t, "pidof crond")
 		if e != nil || len(bytes.TrimSpace(v)) == 0 {

@@ -18,14 +18,15 @@ import (
 const validXray = `{"inbounds":[{"tag":"in","protocol":"socks","port":1080,"settings":{}}],"outbounds":[{"tag":"out","protocol":"freedom","settings":{}}]}`
 
 type fakeRouter struct {
-	files    map[string][]byte
-	modes    map[string]fs.FileMode
-	commands []string
-	active   string
-	packages string
-	writes   int
-	fail     string
-	cancel   context.CancelFunc
+	files     map[string][]byte
+	modes     map[string]fs.FileMode
+	commands  []string
+	active    string
+	packages  string
+	writes    int
+	fail      string
+	cancel    context.CancelFunc
+	listeners string
 }
 
 func fixture() *fakeRouter {
@@ -37,6 +38,12 @@ func (f *fakeRouter) Run(ctx context.Context, c string) (router.Result, error) {
 	}
 	f.commands = append(f.commands, c)
 	switch c {
+	case "netstat -lntp":
+		return router.Result{Stdout: []byte("Active Internet connections (only servers)\nProto Recv-Q Send-Q Local Address Foreign Address State PID/Program name\n" + f.listeners)}, nil
+	case "readlink /proc/1/exe":
+		return router.Result{Stdout: []byte("/opt/sbin/" + f.active)}, nil
+	case "readlink /proc/42/exe":
+		return router.Result{Stdout: []byte("/opt/sbin/xkeen-ui")}, nil
 	case "printf 'XKEEN_SHELL_OK\\n'":
 		return router.Result{Stdout: []byte("XKEEN_SHELL_OK\n")}, nil
 	case "pidof crond":
@@ -44,7 +51,7 @@ func (f *fakeRouter) Run(ctx context.Context, c string) (router.Result, error) {
 	case "uname -m":
 		return router.Result{Stdout: []byte("aarch64")}, nil
 	case "ps w":
-		return router.Result{Stdout: []byte("PID USER COMMAND\n1 root /opt/sbin/" + f.active)}, nil
+		return router.Result{Stdout: []byte("PID USER COMMAND\n1 root " + f.active + " run")}, nil
 	case "/opt/bin/opkg list-installed":
 		return router.Result{Stdout: []byte(f.packages)}, nil
 	}

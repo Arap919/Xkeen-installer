@@ -3,6 +3,7 @@ package config
 import (
 	"encoding/json"
 	"errors"
+	"path"
 	"strings"
 
 	"github.com/Arap919/xkeen-installer/internal/catalog"
@@ -62,6 +63,7 @@ func Prepare(s router.Snapshot, selection Selection, input Import) (ConfigPropos
 	if p.ActiveCore != "" && !cores[p.ActiveCore] {
 		p.conflict("", "Existing active core is excluded; choose a switch explicitly.", "")
 	}
+	providerFiles := referencedProxyData(s)
 	for _, core := range []catalog.Component{catalog.Mihomo, catalog.Xray} {
 		if !cores[core] {
 			continue
@@ -119,7 +121,7 @@ func Prepare(s router.Snapshot, selection Selection, input Import) (ConfigPropos
 		}
 	}
 	for _, f := range p.Files {
-		if f.Path == WatchdogPath {
+		if f.Path == WatchdogPath || providerFiles[f.Path] {
 			continue
 		}
 		core := "xray"
@@ -163,6 +165,47 @@ func Prepare(s router.Snapshot, selection Selection, input Import) (ConfigPropos
 		}
 	}
 	return p, nil
+}
+
+// Only explicitly referenced proxy data under the primary configuration directory
+// is exempt from full-core structure checks. Unknown YAML remains fail-closed.
+func referencedProxyData(s router.Snapshot) map[string]bool {
+	out := map[string]bool{}
+	main, ok := s.Config(MihomoPath)
+	if !ok {
+		return out
+	}
+	m, err := mihomoDocument(main)
+	if err != nil {
+		return out
+	}
+	providers, _ := m["proxy-providers"].(map[string]any)
+	for _, value := range providers {
+		provider, _ := value.(map[string]any)
+		if provider["type"] != "http" && provider["type"] != "file" {
+			continue
+		}
+		name, ok := provider["path"].(string)
+		if !ok || name == "" || path.IsAbs(name) || strings.ContainsAny(name, "\x00\r\n") {
+			continue
+		}
+		name = path.Join(path.Dir(MihomoPath), name)
+		if name == MihomoPath || !strings.HasPrefix(name, path.Dir(MihomoPath)+"/") {
+			continue
+		}
+		data, exists := s.Config(name)
+		if !exists {
+			continue
+		}
+		document, e := mihomoDocument(data)
+		if e != nil || len(document) != 1 {
+			continue
+		}
+		if _, ok := document["proxies"].([]any); ok {
+			out[name] = true
+		}
+	}
+	return out
 }
 func watchdogAddition() string {
 	return "Merge only missing entries into the corresponding sections; resolve occupied ports first:\nexternal-controller: 127.0.0.1:9090\nsecret: <private generated API secret>\nproxy-groups:\n  - name: PROXY\n    type: select\n    use: [<existing provider names>]\n  - name: BENCHMARK\n    type: select\n    use: [<same provider names>]\nlisteners:\n  - name: benchmark-in\n    type: http\n    listen: 127.0.0.1\n    port: 17890\n    proxy: BENCHMARK\n    users: []"

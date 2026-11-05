@@ -28,6 +28,8 @@ type readRouter struct {
 func (f *readRouter) Run(_ context.Context, c string) (router.Result, error) {
 	f.commands = append(f.commands, c)
 	switch c {
+	case "netstat -lntp":
+		return router.Result{Stdout: []byte("Active Internet connections (only servers)\nProto Recv-Q Send-Q Local Address Foreign Address State PID/Program name\n")}, nil
 	case "printf 'XKEEN_SHELL_OK\\n'":
 		return router.Result{Stdout: []byte("XKEEN_SHELL_OK\n")}, nil
 	case "uname -m":

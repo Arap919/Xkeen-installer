@@ -250,6 +250,14 @@ func BuildPlan(s router.Snapshot, selection Selection, proposal config.ConfigPro
 		if init, ok := s.Config("/opt/etc/init.d/S99xkeen-ui"); ok && (!bytes.Contains(init, []byte("PROCS=xkeen-ui")) || !bytes.Contains(init, []byte(". /opt/etc/init.d/rc.func"))) {
 			return fail("Нестандартный init панели требует ручной проверки")
 		}
+		port, existing, e := plannedUIPort(s)
+		if e != nil {
+			return Plan{}, e
+		}
+		if e = s.CheckUIPort(port, existing); e != nil {
+			return Plan{}, e
+		}
+		d.uiPort = port
 	}
 	components := []catalog.Component{catalog.XKeen}
 	for _, c := range []catalog.Component{catalog.Mihomo, catalog.Xray} {
@@ -267,6 +275,9 @@ func BuildPlan(s router.Snapshot, selection Selection, proposal config.ConfigPro
 		components = append(components, catalog.Watchdog)
 	}
 	p := Plan{ActiveCore: active, Dependencies: []string{"curl", "jq", "ip-full", "iptables", "ipset", "ca-bundle", "coreutils-uname", "coreutils-nohup", "conntrack"}}
+	if selection.UI {
+		p.Notes = append(p.Notes, fmt.Sprintf("Проверен TCP-порт панели: %d; перед записью проверка будет повторена", d.uiPort))
+	}
 	if selection.Config.Watchdog {
 		p.Dependencies = append(p.Dependencies, "python3", "python3-yaml", "wget-ssl")
 	}
