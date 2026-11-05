@@ -22,6 +22,9 @@ import (
 func sshFixture(t *testing.T, shellOnly ...bool) (string, ssh.Signer) {
 	t.Helper()
 	shellMode := len(shellOnly) > 0 && shellOnly[0]
+	if shellMode && runtime.GOOS == "windows" {
+		t.Skip("POSIX shell fixture requires Unix /bin/sh and filesystem permissions")
+	}
 	truncateWrites := len(shellOnly) > 1 && shellOnly[1]
 	shellRoot := t.TempDir()
 	if shellMode {

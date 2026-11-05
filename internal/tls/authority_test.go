@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"syscall"
 	"testing"
 )
 
@@ -20,12 +21,18 @@ func TestStoragePrivateAndUnsafePaths(t *testing.T) {
 	}
 	for _, n := range []string{"ca.key", "ca.crt", "server.key", "server.crt"} {
 		i, e := os.Stat(filepath.Join(dir, n))
-		if e != nil || i.Mode().Perm() != 0600 {
+		if e != nil {
 			t.Fatal(n, e)
 		}
+		if !i.Mode().IsRegular() || runtime.GOOS != "windows" && i.Mode().Perm() != 0600 {
+			t.Fatal("unsafe storage file", n, i.Mode())
+		}
 	}
-	i, _ := os.Stat(dir)
-	if i.Mode().Perm() != 0700 {
+	i, e := os.Stat(dir)
+	if e != nil {
+		t.Fatal(e)
+	}
+	if !i.IsDir() || runtime.GOOS != "windows" && i.Mode().Perm() != 0700 {
 		t.Fatal(i.Mode())
 	}
 	q, e := Load(dir, "router.test")
@@ -40,19 +47,31 @@ func TestStoragePrivateAndUnsafePaths(t *testing.T) {
 	if e = p.Save(dir); e != nil {
 		t.Fatal("idempotent save", e)
 	}
-	link := filepath.Join(t.TempDir(), "link")
-	os.Symlink(dir, link)
-	if p.Save(link) == nil {
-		t.Fatal("symlink")
-	}
 	if p.Save(dir+"/../bad") == nil {
 		t.Fatal("unclean")
 	}
-	os.Remove(filepath.Join(dir, "server.key"))
-	os.Symlink(filepath.Join(dir, "ca.key"), filepath.Join(dir, "server.key"))
-	if _, e = Load(dir, "router.test"); e == nil {
-		t.Fatal("linked key")
-	}
+	t.Run("symlinks", func(t *testing.T) {
+		link := filepath.Join(t.TempDir(), "link")
+		if err := os.Symlink(dir, link); err != nil {
+			// Windows error 1314 is ERROR_PRIVILEGE_NOT_HELD.
+			if runtime.GOOS == "windows" && (errors.Is(err, os.ErrPermission) || errors.Is(err, syscall.Errno(1314))) {
+				t.Skip("Windows symlink fixture requires Developer Mode or symlink privilege")
+			}
+			t.Fatal(err)
+		}
+		if p.Save(link) == nil {
+			t.Fatal("symlink")
+		}
+		if err := os.Remove(filepath.Join(dir, "server.key")); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Symlink(filepath.Join(dir, "ca.key"), filepath.Join(dir, "server.key")); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := Load(dir, "router.test"); err == nil {
+			t.Fatal("linked key")
+		}
+	})
 }
 
 type fakeCommands struct {
