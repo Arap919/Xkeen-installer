@@ -336,7 +336,12 @@ func TestCleanXrayAndCancellationAfterInstall(t *testing.T) {
 	defer cancel()
 	load := func(ctx context.Context, a []catalog.Artifact) ([]payload, error) {
 		out, _ := fakeLoad(ctx, a)
-		return append(out, payload{path: "/opt/sbin/.xkeen/02_install/07_install_register/04_register_init.sh", data: []byte("#!/bin/sh\nname_client=\"xray\"\n"), mode: 0755, component: catalog.XKeen}), nil
+		for i := range out {
+			if out[i].path == "/opt/sbin/.xkeen/02_install/07_install_register/04_register_init.sh" {
+				out[i].data = []byte(reviewedInitFixture)
+			}
+		}
+		return out, nil
 	}
 	r, e := run(ctx, p, f, func(e Event) {
 		if e.Step == "install" && e.Status == "completed" {
@@ -353,6 +358,14 @@ func TestCleanXrayAndCancellationAfterInstall(t *testing.T) {
 		if strings.Contains(c, " start on") {
 			t.Fatal("started after cancel")
 		}
+	}
+	if _, err := run(context.Background(), p, f, nil, load); !errors.Is(err, ErrConsumed) {
+		t.Fatal("cancelled plan reused", err)
+	}
+	retry := confirm(t, planFor(t, f))
+	result, err := run(context.Background(), retry, f, nil, load)
+	if err != nil || !result.Complete || !result.Backup.Verified() || f.active != "xray" {
+		t.Fatalf("fresh retry failed: result=%+v active=%s err=%v", result, f.active, err)
 	}
 }
 func TestPlanBlocksConflictsAndUnsafeCron(t *testing.T) {

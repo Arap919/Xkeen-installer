@@ -1,1 +1,16 @@
-{"$schema":"https://wails.io/schemas/config.v2.json","name":"xkeen-installer","outputfilename":"xkeen-installer","frontend:install":"npm install","frontend:build":"npm run build","frontend:dev:watcher":"npm run dev","frontend:dev:serverUrl":"auto","author":{"name":"Arap919"}}
+{
+  "$schema": "https://wails.io/schemas/config.v2.json",
+  "name": "xkeen-installer",
+  "outputfilename": "xkeen-installer",
+  "frontend:install": "npm ci",
+  "frontend:build": "npm run build",
+  "frontend:dev:watcher": "npm run dev",
+  "frontend:dev:serverUrl": "auto",
+  "author": {"name": "Arap919"},
+  "info": {
+    "companyName": "Arap919",
+    "productName": "XKeen Installer",
+    "productVersion": "0.1.0",
+    "comments": "Graphical installer for prepared Keenetic routers"
+  }
+}
