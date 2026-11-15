@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -105,6 +106,9 @@ type subscriptionTransport func(*http.Request) (*http.Response, error)
 func (f subscriptionTransport) RoundTrip(r *http.Request) (*http.Response, error) { return f(r) }
 
 func TestUpdaterBehavior(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Router updater requires POSIX fcntl and file permissions")
+	}
 	python, err := exec.LookPath("python3")
 	if err != nil {
 		t.Skip("Python unavailable")
