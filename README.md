@@ -16,7 +16,7 @@
 
 ## Сборка
 
-Зафиксированы Wails 2.17.1, Go 1.26.3 и Node.js 26.5.0 с npm. Нужны системные зависимости [Wails v2](https://v2.wails.io/docs/gettingstarted/installation/). WebView берётся из системы:
+Зафиксированы Wails 2.17.1, Go 1.26.11 и Node.js 26.5.0 с npm. Нужны системные зависимости [Wails v2](https://v2.wails.io/docs/gettingstarted/installation/). WebView берётся из системы:
 
 | Цель | Среда сборки и запуска | Результат |
 | --- | --- | --- |

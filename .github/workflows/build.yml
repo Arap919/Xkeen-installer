@@ -62,22 +62,22 @@ jobs:
           - target: windows-amd64
             runner: windows-2022
             platform: windows/amd64
-            tags: ""
+            tags: "wv2runtime.error"
             extra: "-webview2 error -nsis"
           - target: macos-amd64
             runner: macos-15-intel
             platform: darwin/amd64
-            tags: ""
+            tags: "wv2runtime.download"
             extra: ""
           - target: macos-arm64
             runner: macos-15
             platform: darwin/arm64
-            tags: ""
+            tags: "wv2runtime.download"
             extra: ""
           - target: linux-amd64
             runner: ubuntu-24.04
             platform: linux/amd64
-            tags: webkit2_41
+            tags: "webkit2_41,wv2runtime.download"
             extra: "-tags webkit2_41"
     defaults:
       run:
@@ -92,7 +92,7 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@4b73464bb391d4059bd26b0524d20df3927bd417 # v6.3.0
         with:
-          go-version: "1.26.3"
+          go-version: "1.26.11"
       - name: Set up Node
         uses: actions/setup-node@2028fbc5c25fe9cf00d9f06a71cc4710d4507903 # v6.0.0
         with:
@@ -141,11 +141,35 @@ jobs:
         run: |
           go test -tags "$BUILD_TAGS" ./...
           go vet -tags "$BUILD_TAGS" ./...
+      - name: Scan production source for vulnerabilities
+        env:
+          BUILD_TAGS: ${{ matrix.tags }}
+        run: |
+          go run golang.org/x/vuln/cmd/govulncheck@v1.9.0 -tags "desktop,production,$BUILD_TAGS" ./...
       - name: Build desktop application
         env:
           BUILD_PLATFORM: ${{ matrix.platform }}
           BUILD_EXTRA: ${{ matrix.extra }}
         run: go run github.com/wailsapp/wails/v2/cmd/wails@v2.17.1 build -platform "$BUILD_PLATFORM" -trimpath $BUILD_EXTRA
+      - name: Verify and scan built Go executable
+        shell: python
+        run: |
+          import pathlib, subprocess
+          candidates = []
+          for path in pathlib.Path('build/bin').rglob('*'):
+              if not path.is_file():
+                  continue
+              result = subprocess.run(['go', 'version', '-m', str(path)], capture_output=True, text=True)
+              if result.returncode == 0 and '\tpath\tgithub.com/Arap919/xkeen-installer\n' in result.stdout:
+                  candidates.append((path, result.stdout))
+          if len(candidates) != 1:
+              raise SystemExit(f'Expected one application Go executable, found {len(candidates)}')
+          path, metadata = candidates[0]
+          print(metadata)
+          expected = subprocess.check_output(['go', 'env', 'GOVERSION'], text=True).strip()
+          if not metadata.splitlines()[0].endswith(': ' + expected):
+              raise SystemExit('Built executable does not use the configured Go toolchain')
+          subprocess.run(['go', 'run', 'golang.org/x/vuln/cmd/govulncheck@v1.9.0', '-mode=binary', str(path)], check=True)
       - name: Package Windows installer
         if: runner.os == 'Windows'
         shell: pwsh
