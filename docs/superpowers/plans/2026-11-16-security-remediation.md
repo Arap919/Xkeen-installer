@@ -1,7 +1,7 @@
 # Security Remediation Plan and Audit Register
 
 **Audit date:** 2026-11-16
-**Status:** Remediation in progress; SEC-005 implemented locally and awaiting full platform-matrix evidence. No exploitation demonstrated.
+**Status:** Remediation in progress; SEC-005 closed for the new CI build candidates. Other findings remain open. No exploitation demonstrated.
 **Goal:** Address the security findings from the source and local-artifact audit before broad installer distribution.
 **Architecture:** Preserve the existing SSH transport, reviewed artifact catalog, installation approval gates, and private TLS storage. Remediate each trust boundary independently; do not redesign unrelated installation behavior.
 **Tech stack:** Go, Wails v2, TypeScript, Python, Entware/opkg, GitHub Actions, Windows/macOS/Linux packaging.
@@ -130,16 +130,16 @@ P1 means address or explicitly resolve before broad distribution. P2 means a con
 
 ### SEC-005: Update Go and triage production vulnerability scans
 
-**Status:** In progress; local macOS ARM64 checks and independent review passed; full CI matrix pending
+**Status:** Closed for commit 617c94d CI candidates; previously distributed binaries are not covered
 **Priority:** P1
 **Evidence:** `.github/workflows/build.yml` pins Go 1.26.3; local Windows EXE build metadata agrees; govulncheck reported 20 symbol-level standard-library findings.
 **Impact:** Known parser, protocol, and runtime weaknesses may remain in shipped binaries. A scanner call-path match alone does not establish exploitability.
 
-- [ ] Select a currently supported Go patch release covering applicable advisories. The observed report included fixes through Go 1.26.11; confirm the actual supported release at implementation time.
-- [ ] Update CI/toolchain declarations and rebuild all four desktop targets; updating an installed Go compiler alone does not repair previously built binaries.
-- [ ] Run govulncheck for actual production tags/platforms, and inspect resulting binaries where supported. Record advisory IDs, platform relevance, prerequisites, mitigation, and disposition.
-- [ ] Add a CI vulnerability gate with explicit, justified handling of non-applicable findings; do not globally suppress standard-library reports.
-- [ ] Run existing Go/frontend checks and verify embedded Go versions in release artifacts.
+- [x] Select a currently supported Go patch release covering applicable advisories. The observed report included fixes through Go 1.26.11; confirm the actual supported release at implementation time.
+- [x] Update CI/toolchain declarations and rebuild all four desktop targets; updating an installed Go compiler alone does not repair previously built binaries.
+- [x] Run govulncheck for actual production tags/platforms, and inspect resulting binaries where supported. Record advisory IDs, platform relevance, prerequisites, mitigation, and disposition.
+- [x] Add a CI vulnerability gate with explicit, justified handling of non-applicable findings; do not globally suppress standard-library reports.
+- [x] Run existing Go/frontend checks and verify embedded Go versions in release artifacts.
 
 **Acceptance:** Newly built artifacts use the reviewed patched toolchain. Every remaining finding has a documented applicability decision; no applicable unresolved release blocker remains.
 **Likely files:** `.github/workflows/build.yml`, `go.mod` only if needed by the selected supported version, related toolchain documentation.
@@ -199,12 +199,13 @@ For each SEC ID record: implementation commit, affected platforms, verification 
 
 ## SEC-005 execution record (2026-11-16)
 
-- Implementation: uncommitted changes in `.github/workflows/build.yml`, `go.mod`, `go.sum`, and `README.md`; no push, release, or publication performed.
+- Implementation commit: `617c94d4141b88d4acf03f3905e6968d22532efa`, pushed with user authorization to `feature/installer`. No release publication performed.
 - Toolchain: Go 1.26.11, confirmed in the official stable downloads catalog (`https://go.dev/dl/?mode=json`). The installed default remains 1.26.3; local verification explicitly used `GOTOOLCHAIN=go1.26.11`.
 - CI: pinned govulncheck v1.9.0; source checks use Wails production tags, including `desktop`, platform WebView2 strategy, and Linux `webkit2_41`. A second gate selects exactly one built application executable, verifies its embedded Go version against the configured compiler, and scans its binary. Errors stop packaging/release; no advisory suppressions.
 - Advisory disposition: GO-2026-6866 and GO-2026-6860 were reported for x/net v0.60.0; upgraded to v0.62.0. GO-2026-5932 was module-only in the source scan but blocked the stripped-binary scan for x/crypto v0.58.0; upgraded to v0.59.0 rather than suppressing it. Required transitive versions are x/sys v0.50.0 and x/text v0.44.0. The binary finding alone did not establish call-path reachability.
 - Verification on macOS ARM64: `GOTOOLCHAIN=go1.26.11 go test ./...` passed all eight packages; production `go vet` passed; `npm run typecheck`, `npm test` (58/58), and `npm run build` passed. Final source govulncheck with `desktop,production,wv2runtime.download` and `-show verbose`: no vulnerabilities found.
 - Rebuilt the local production app with Wails v2.17.1 (`build -platform darwin/arm64 -trimpath -skipbindings -s`, using the freshly built frontend). Embedded metadata confirms go1.26.11 and production tags. Final binary govulncheck: no vulnerabilities found. Executed the CI Python gate against the local app bundle successfully; its search root was narrowed to that bundle to exclude pre-existing binaries for other platforms.
 - Independent security reviewer: first review returned a Windows production-tag mismatch; corrected. Second review found no remaining actionable defect in the diff. Reviewer explicitly requires complete platform evidence before closure.
-- Remaining acceptance evidence: native CI source/binary scans, builds, tests, and embedded toolchain metadata for Windows AMD64, Linux AMD64, and macOS AMD64, plus the full CI macOS ARM64 packaging run. Old local Windows/ZIP artifacts remain outside this verification and must not be treated as rebuilt.
-- Final status: OPEN pending platform-matrix verification. No security task after SEC-005 has been started.
+- Full native CI evidence: [run 43769000738](https://github.com/Arap919/Xkeen-installer/actions/runs/43769000738), commit `617c94d4141b88d4acf03f3905e6968d22532efa`, completed successfully. Linux AMD64 job `132980473905`, Windows AMD64 `132980473932`, macOS AMD64 `132980474021`, macOS ARM64 `132980474040`: production source and binary scans reported no vulnerabilities; executable metadata confirmed go1.26.11 and expected GOOS/GOARCH/tags; all eight Go packages, vet, frontend typecheck, 58 tests, frontend build, native desktop build, packaging and upload passed. Release job was skipped. Old local and published binaries remain outside this verification.
+- Final reviewer decision: independent security specialist retrieved all four native job logs, confirmed the checked-out commit, tests, source/binary scans, embedded toolchain and target metadata, and recommended closure. No unresolved advisory remained in these scans.
+- Final status: CLOSED for the new CI candidates. Broad distribution remains gated by the other open SEC findings, including SEC-006. No real-router installation or exploitation was performed.
