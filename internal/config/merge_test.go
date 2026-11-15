@@ -93,7 +93,7 @@ func TestNewProviderBackedConfiguration(t *testing.T) {
 	}
 	w, _ := p.File(WatchdogPath)
 	var m map[string]any
-	if json.Unmarshal(w, &m) != nil || m["target_group"] != "PROXY" || m["secret"] == "" {
+	if json.Unmarshal(w, &m) != nil || m["target_group"] != "Proxy" || m["secret"] == "" {
 		t.Fatal("incompatible watchdog")
 	}
 	for _, v := range []string{fmt.Sprintf("%+v", p), fmt.Sprintf("%#v", p), string(mustJSON(t, p))} {

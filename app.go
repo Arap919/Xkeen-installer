@@ -24,6 +24,32 @@ import (
 )
 
 func publicError(message string) error { return errors.New(message) }
+
+// Only stable public categories cross the bridge; transport errors can contain
+// server-provided text and must never be displayed or logged verbatim.
+func connectionFailure(err error) error {
+	var network net.Error
+	if errors.Is(err, context.DeadlineExceeded) || errors.As(err, &network) && network.Timeout() {
+		return publicError("[SSH_TIMEOUT] Время ожидания SSH истекло")
+	}
+	if strings.Contains(err.Error(), "unable to authenticate") {
+		return publicError("[SSH_AUTH] SSH не принял учётные данные")
+	}
+	return publicError("[SSH_CONNECT] Не удалось установить SSH-соединение")
+}
+
+func inspectionFailure(err error) error {
+	if errors.Is(err, router.ErrNotPOSIXShell) {
+		return publicError("[SSH_SHELL] Подключение не предоставляет POSIX shell")
+	}
+	if errors.Is(err, router.ErrUnsupportedCPU) {
+		return publicError("[SSH_ARCH] Архитектура роутера не поддерживается")
+	}
+	if errors.Is(err, context.DeadlineExceeded) {
+		return publicError("[SSH_TIMEOUT] Проверка не завершилась за отведённое время")
+	}
+	return publicError("[SSH_INSPECT] SSH подключён, но проверка Entware не завершена")
+}
 func newID() string {
 	var b [16]byte
 	if _, err := rand.Read(b[:]); err != nil {
@@ -52,12 +78,18 @@ func (a *App) Inspect(c ConnectionRequest) (InspectionView, error) {
 	if a.busy {
 		return InspectionView{}, publicError("Дождитесь завершения операции")
 	}
+	if !a.bootstrapAwait {
+		a.closeBootstrap()
+	}
+	if a.bootstrapAwait && c.Host != a.address {
+		return InspectionView{}, publicError("[SSH_INITRC] Сначала завершите проверку Entware исходного роутера или завершите сессию")
+	}
 	a.invalidate()
 	a.closeConnection()
 	a.pendingHost = nil
 	a.result = ResultView{}
 	if c.Host == "" || strings.ContainsAny(c.Host, "/\\\r\n\x00 ") || strings.Contains(c.Host, ":") && net.ParseIP(c.Host) == nil || c.Port < 1 || c.Port > 65535 || c.User == "" || len(c.Password) > 4096 {
-		return InspectionView{}, publicError("Проверьте адрес, порт и имя пользователя")
+		return InspectionView{}, publicError("[SSH_INPUT] Проверьте адрес, порт и имя пользователя")
 	}
 	address := net.JoinHostPort(c.Host, strconv.Itoa(c.Port))
 	t, err := router.DialSSH(a.ctx, router.SSHConfig{Address: address, User: c.User, Auth: []ssh.AuthMethod{ssh.Password(c.Password)}, HostKeyFingerprint: a.hostKeys[address]})
@@ -69,12 +101,22 @@ func (a *App) Inspect(c ConnectionRequest) (InspectionView, error) {
 			a.pendingHost = v
 			return InspectionView{HostKey: v}, nil
 		}
-		return InspectionView{}, publicError("Не удалось подключиться по SSH. Проверьте доступ и учётные данные")
+		return InspectionView{}, connectionFailure(err)
 	}
 	snapshot, err := router.Inspect(a.ctx, t)
 	if err != nil {
 		_ = t.Close()
-		return InspectionView{}, publicError("Проверка не завершена. Нужны POSIX shell, доступ к /opt и поддерживаемая архитектура")
+		return InspectionView{}, inspectionFailure(err)
+	}
+	if a.bootstrapAwait {
+		bounded, cancel := context.WithTimeout(a.ctx, 30*time.Second)
+		err = verifyBootstrapHandoff(bounded, a.firmware, t)
+		cancel()
+		if !snapshot.Entware || err != nil {
+			_ = t.Close()
+			return InspectionView{}, publicError("[SSH_INITRC] Дождитесь завершения Entware; нужен Initrc /opt/etc/init.d/rc.unslung и исполняемый файл по этому пути")
+		}
+		a.closeBootstrap()
 	}
 	a.transport = t
 	a.address = c.Host
@@ -105,8 +147,11 @@ func (a *App) current(id string) bool {
 func (a *App) PreparePlan(r PlanRequest) (PlanView, error) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	if a.busy || !a.current(r.InspectionID) {
-		return PlanView{}, publicError("Повторите проверку роутера перед подготовкой плана")
+	if a.busy {
+		return PlanView{}, publicError("[PLAN/STATE/BUSY]")
+	}
+	if !a.current(r.InspectionID) {
+		return PlanView{}, publicError("[PLAN/INSPECTION/STALE]")
 	}
 	a.plan = install.Plan{}
 	a.confirmed = false
@@ -116,18 +161,55 @@ func (a *App) PreparePlan(r PlanRequest) (PlanView, error) {
 	for _, core := range r.Cores {
 		selection.Cores = append(selection.Cores, catalog.Component(core))
 	}
-	if len(r.ImportText) > config.MaxImportBytes || len(r.ProviderURL) > 8192 || r.ImportText != "" && r.ProviderURL != "" {
-		return PlanView{}, publicError("Выберите один источник конфигурации размером до 2 МиБ")
+	if len(r.ImportText) > config.MaxImportBytes {
+		return PlanView{}, publicError("[PLAN/INPUT/FILE_SIZE]")
 	}
+	if r.ImportText != "" && (r.ProviderURL != "" || len(r.MihomoProviderURLs) > 0 || len(r.XrayProviderURLs) > 0) {
+		return PlanView{}, publicError("[PLAN/INPUT/MIXED_SOURCES]")
+	}
+	if r.ProviderURL != "" && len(r.MihomoProviderURLs) > 0 {
+		return PlanView{}, publicError("[PLAN/INPUT/DUPLICATE]")
+	}
+
 	input := config.Import{}
 	if r.ImportText != "" {
 		input = config.LocalImport(catalog.Component(r.ImportCore), []byte(r.ImportText))
-	} else if r.ProviderURL != "" {
-		input = config.ProviderImport(r.ProviderURL)
+	} else {
+		urls := r.MihomoProviderURLs
+		if r.ProviderURL != "" {
+			urls = []string{r.ProviderURL}
+		}
+		var err error
+		ctx := a.ctx
+		if ctx == nil {
+			ctx = context.Background()
+		}
+		hasMihomo, hasXray := false, false
+		for _, c := range selection.Cores {
+			hasMihomo = hasMihomo || c == catalog.Mihomo
+			hasXray = hasXray || c == catalog.Xray
+		}
+		if len(urls) > 0 && !hasMihomo {
+			return PlanView{}, publicError("[SUBSCRIPTION/MIHOMO/SELECTION/CORE_MISSING/1/0]")
+		}
+		if len(r.XrayProviderURLs) > 0 && !hasXray {
+			return PlanView{}, publicError("[SUBSCRIPTION/XRAY/SELECTION/CORE_MISSING/1/0]")
+		}
+		input, err = config.ResolveSubscriptions(ctx, urls, r.XrayProviderURLs)
+		if err != nil {
+			diagnostic := config.PublicSubscriptionError(err)
+			if diagnostic == "" {
+				diagnostic = "[SUBSCRIPTION/UNKNOWN/INTERNAL/UNEXPECTED/0/0]"
+			}
+			return PlanView{}, publicError(diagnostic)
+		}
 	}
 	proposal, err := config.Prepare(a.snapshot, selection, input)
 	if err != nil {
-		return PlanView{}, publicError("Конфигурация не прошла проверку формата; проверьте локальный файл или адрес подписки")
+		if diagnostic := config.PublicSubscriptionError(err); diagnostic != "" {
+			return PlanView{}, publicError(diagnostic)
+		}
+		return PlanView{}, publicError(configurationPlanDiagnostic(err))
 	}
 	a.proposal = proposal
 	chosen := install.Selection{Config: selection, UI: r.UI}
@@ -137,11 +219,15 @@ func (a *App) PreparePlan(r PlanRequest) (PlanView, error) {
 		key, _ := a.snapshot.Config("/opt/etc/nginx/ssl/server.key")
 		root, e := os.UserConfigDir()
 		if e != nil {
-			return PlanView{}, publicError("Закрытое локальное хранилище недоступно")
+			return PlanView{}, publicError("[PLAN/TLS/STORAGE_PATH]")
 		}
 		tls, dir, e := prepareTLSStore(a.address, cert, key, filepath.Join(root, "xkeen-installer"))
 		if e != nil {
-			return PlanView{}, publicError("TLS или закрытое хранилище CA требуют ручной проверки; замена запрещена")
+			var storage *localtls.StorageError
+			if errors.As(e, &storage) {
+				return PlanView{}, publicError("[PLAN/TLS/" + storage.Operation + "]")
+			}
+			return PlanView{}, publicError("[PLAN/TLS/PREPARE]")
 		}
 		a.tls = tls
 		a.tlsDir = dir
@@ -168,7 +254,7 @@ func (a *App) planView() PlanView {
 		case strings.HasPrefix(conflict.Reason, "Import would replace"):
 			conflict.Reason = "Импорт заменил бы существующую конфигурацию; согласуйте изменения вручную"
 		case strings.HasPrefix(conflict.Reason, "Watchdog requires"):
-			conflict.Reason = "Watchdog требует согласованных групп PROXY/BENCHMARK с provider-backed узлами, API secret и отдельных портов; существующие данные сохранены"
+			conflict.Reason = "Watchdog требует согласованных групп Proxy/BENCHMARK (или прежней PROXY) с provider-backed узлами, API secret и отдельных портов; существующие данные сохранены"
 		case strings.HasPrefix(conflict.Reason, "Existing watchdog"):
 			conflict.Reason = "Существующие настройки watchdog не соответствуют конфигурации Mihomo"
 		case strings.HasPrefix(conflict.Reason, "Add a user proxy outbound"):
@@ -250,6 +336,9 @@ func (a *App) CancelInstall() {
 	if a.cancel != nil {
 		a.cancel()
 	}
+	if !a.busy {
+		a.closeBootstrap()
+	}
 	a.snapshotID = ""
 	a.confirmed = false
 }
@@ -290,7 +379,7 @@ func (a *App) Verify() (ResultView, error) {
 	}
 	a.result.Message = "Проверка выполнена. Неподтверждённые пункты требуют ручных действий"
 	for _, service := range report.Services {
-		if service.Component == catalog.UI && service.HTTPS.State == verify.Passed {
+		if verifiedPanelReady(service) {
 			ctx, cancel := context.WithTimeout(a.ctx, 5*time.Second)
 			init, readErr := a.transport.Read(ctx, "/opt/etc/init.d/S99xkeen-ui")
 			cancel()
@@ -308,7 +397,11 @@ func (a *App) ExportRedactedReport() (string, error) {
 	return string(b), err
 }
 
-// Called only after the installed HTTPS endpoint has passed verification.
+func verifiedPanelReady(service verify.ServiceReport) bool {
+	return service.Component == catalog.UI && service.HTTPS.State == verify.Passed && service.API.State == verify.Passed && service.Trust.State == verify.Passed
+}
+
+// Called only after HTTPS, panel API and system trust have passed verification.
 func verifiedPanelAddress(address string, init []byte) string {
 	var args []string
 	count := 0
@@ -344,6 +437,7 @@ func (a *App) EndSession() error {
 		return publicError("Сначала остановите установку и дождитесь результата")
 	}
 	a.invalidate()
+	a.closeBootstrap()
 	a.closeConnection()
 	a.snapshot = router.Snapshot{}
 	a.tls = localtls.TLSProposal{}
@@ -361,7 +455,7 @@ func prepareTLSStore(address string, cert, key []byte, base string) (localtls.TL
 	if _, err := os.Lstat(dir); err == nil {
 		owned, e := localtls.Load(dir, address)
 		if e != nil {
-			return localtls.TLSProposal{}, "", e
+			return localtls.TLSProposal{}, "", &localtls.StorageError{Operation: "LOAD_STORE"}
 		}
 		if len(cert) == 0 && len(key) == 0 || owned.MatchesExisting(cert, key) {
 			return owned, dir, nil
@@ -371,13 +465,13 @@ func prepareTLSStore(address string, cert, key []byte, base string) (localtls.TL
 	}
 	proposal, err := localtls.PrepareTLS(address, localtls.ExistingTLS(cert, key, nil))
 	if err != nil {
-		return localtls.TLSProposal{}, "", err
+		return localtls.TLSProposal{}, "", &localtls.StorageError{Operation: "GENERATE"}
 	}
 	if proposal.Status() != localtls.Prepared {
 		return proposal, "", nil
 	}
 	if err = os.MkdirAll(base, 0700); err != nil {
-		return localtls.TLSProposal{}, "", err
+		return localtls.TLSProposal{}, "", &localtls.StorageError{Operation: "BASE_DIRECTORY"}
 	}
 	info, err := os.Lstat(base)
 	if err != nil || !info.IsDir() || info.Mode()&os.ModeSymlink != 0 || runtime.GOOS != "windows" && info.Mode().Perm() != 0700 {
@@ -387,4 +481,31 @@ func prepareTLSStore(address string, cert, key []byte, base string) (localtls.TL
 		return localtls.TLSProposal{}, "", err
 	}
 	return proposal, dir, nil
+}
+
+func configurationPlanDiagnostic(err error) string {
+	reasons := map[string]string{
+		"invalid core selection":                               "CORE_SELECTION",
+		"select at least one core":                             "NO_CORE",
+		"import size limit exceeded":                           "IMPORT_SIZE",
+		"import core is not selected":                          "IMPORT_CORE",
+		"provider import requires Mihomo without local import": "PROVIDER_SOURCE",
+		"invalid Xray subscription input":                      "XRAY_INPUT",
+		"active core is not selected":                          "ACTIVE_CORE",
+		"snapshot configuration contents unavailable":          "SNAPSHOT",
+		"Mihomo configuration size is invalid":                 "MIHOMO_SIZE",
+		"invalid Mihomo YAML mapping":                          "MIHOMO_YAML",
+		"multiple YAML documents are unsupported":              "YAML_DOCUMENTS",
+		"Xray configuration size is invalid":                   "XRAY_SIZE",
+		"invalid Xray JSON object":                             "XRAY_JSON",
+		"generate API secret":                                  "API_SECRET",
+		"missing embedded proxy providers":                     "EMBEDDED_PROVIDERS",
+		"missing embedded VPNProvider":                         "EMBEDDED_PROVIDER",
+	}
+	if err != nil {
+		if reason, ok := reasons[err.Error()]; ok {
+			return "[PLAN/CONFIGURATION/" + reason + "]"
+		}
+	}
+	return "[PLAN/CONFIGURATION/INTERNAL]"
 }

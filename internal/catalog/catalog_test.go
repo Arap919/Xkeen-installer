@@ -108,16 +108,22 @@ func TestVerifyRejectsInvalidWatchdogPayloads(t *testing.T) {
 		t.Fatalf("oversize accepted: %v", err)
 	}
 }
-func TestEntwareCannotClaimVerified(t *testing.T) {
+func TestEntwareReviewedPinsAreExplicitlyLocal(t *testing.T) {
 	a, err := Resolve(Entware, ARM64)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if a.Version != "unversioned" || a.Integrity.SHA256 != "" {
-		t.Fatalf("invented upstream version/digest: %+v", a)
+	if a.Version != "unversioned" || len(a.Integrity.SHA256) != 64 || a.Size != 3232671 || !strings.HasPrefix(a.Integrity.Source, "installer-reviewed:2026-11-07:") {
+		t.Fatalf("missing explicit reviewed pin: %+v", a)
 	}
-	if err := Verify(a, strings.NewReader("archive")); !errors.Is(err, ErrIntegrityUnavailable) {
+	if err := Verify(a, strings.NewReader("archive")); err == nil || !strings.Contains(err.Error(), "size") {
 		t.Fatalf("got %v", err)
+	}
+	for _, arch := range []RouterArch{ARM64, MIPS, MIPSel} {
+		p, _ := Resolve(Entware, arch)
+		if len(p.Integrity.SHA256) != 64 || p.Size <= 0 || !strings.Contains(p.Integrity.Source, p.URL) {
+			t.Fatal("missing provenance", p)
+		}
 	}
 }
 

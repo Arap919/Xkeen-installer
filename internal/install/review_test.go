@@ -171,7 +171,7 @@ func TestServiceLaunchClosesInheritedStreamsAndPreservesStatus(t *testing.T) {
 	starts := 0
 	for _, c := range f.commands {
 		service := ""
-		if strings.HasPrefix(c, "/opt/etc/init.d/S05xkeen start on") {
+		if strings.Contains(c, "/opt/etc/init.d/S05xkeen start on") {
 			service = "/opt/etc/init.d/S05xkeen"
 		}
 		if strings.HasPrefix(c, "/opt/etc/init.d/S99xkeen-ui start") {
@@ -206,5 +206,12 @@ func TestServiceLaunchClosesInheritedStreamsAndPreservesStatus(t *testing.T) {
 	}
 	if starts != 2 {
 		t.Fatalf("tested %d launch commands", starts)
+	}
+}
+
+func TestPreviousEmbeddedXrayBaseRemainsUnconfigured(t *testing.T) {
+	legacy := []byte(`{"log":{"loglevel":"warning"},"inbounds":[{"tag":"transparent-in","listen":"0.0.0.0","port":50080,"protocol":"dokodemo-door","settings":{"network":"tcp,udp","followRedirect":true},"streamSettings":{"sockopt":{"tproxy":"tproxy"}},"sniffing":{"enabled":true,"destOverride":["http","tls"]}}],"outbounds":[{"tag":"blocked-until-configured","protocol":"blackhole","settings":{}}]}`)
+	if !unconfiguredXrayBase(legacy) {
+		t.Fatal("previous installer base must remain inactive after template upgrade")
 	}
 }

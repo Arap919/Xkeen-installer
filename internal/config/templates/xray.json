@@ -1,8 +1,451 @@
 {
-  "log": {"loglevel": "warning"},
-  "inbounds": [{"tag":"transparent-in", "listen":"0.0.0.0", "port":50080,
-    "protocol":"dokodemo-door", "settings":{"network":"tcp,udp", "followRedirect":true},
-    "streamSettings":{"sockopt":{"tproxy":"tproxy"}},
-    "sniffing":{"enabled":true,"destOverride":["http","tls"]}}],
-  "outbounds": [{"tag":"blocked-until-configured", "protocol":"blackhole", "settings":{}}]
+  "log": {
+    "loglevel": "none"
+  },
+  "dns": {
+    "hosts": {
+      "cloudflare-dns.com": [
+        "1.1.1.1",
+        "1.0.0.1"
+      ],
+      "dns.google": [
+        "8.8.8.8",
+        "8.8.4.4"
+      ]
+    },
+    "servers": [
+      "https+local://cloudflare-dns.com/dns-query",
+      "https+local://dns.google/dns-query"
+    ],
+    "queryStrategy": "UseIPv4"
+  },
+  "inbounds": [
+    {
+      "tag": "transparent-in",
+      "listen": "0.0.0.0",
+      "port": 50080,
+      "protocol": "dokodemo-door",
+      "settings": {
+        "network": "tcp,udp",
+        "followRedirect": true
+      },
+      "streamSettings": {
+        "sockopt": {
+          "tproxy": "tproxy"
+        }
+      },
+      "sniffing": {
+        "enabled": true,
+        "destOverride": [
+          "http",
+          "tls",
+          "quic"
+        ],
+        "routeOnly": false
+      }
+    },
+    {
+      "tag": "http-in",
+      "listen": "0.0.0.0",
+      "port": 7890,
+      "protocol": "http",
+      "settings": {},
+      "sniffing": {
+        "enabled": true,
+        "destOverride": [
+          "http",
+          "tls",
+          "quic"
+        ],
+        "routeOnly": false
+      }
+    },
+    {
+      "tag": "socks-in",
+      "listen": "0.0.0.0",
+      "port": 7891,
+      "protocol": "socks",
+      "settings": {
+        "auth": "noauth",
+        "udp": true
+      },
+      "sniffing": {
+        "enabled": true,
+        "destOverride": [
+          "http",
+          "tls",
+          "quic"
+        ],
+        "routeOnly": false
+      }
+    },
+    {
+      "tag": "socks-1080-in",
+      "listen": "0.0.0.0",
+      "port": 1080,
+      "protocol": "socks",
+      "settings": {
+        "auth": "noauth",
+        "udp": true
+      },
+      "sniffing": {
+        "enabled": true,
+        "destOverride": [
+          "http",
+          "tls",
+          "quic"
+        ],
+        "routeOnly": false
+      }
+    },
+    {
+      "tag": "benchmark-in",
+      "listen": "0.0.0.0",
+      "port": 17890,
+      "protocol": "http",
+      "settings": {},
+      "sniffing": {
+        "enabled": true,
+        "destOverride": [
+          "http",
+          "tls",
+          "quic"
+        ],
+        "routeOnly": false
+      }
+    },
+    {
+      "tag": "dns-in",
+      "listen": "0.0.0.0",
+      "port": 7874,
+      "protocol": "dokodemo-door",
+      "settings": {
+        "address": "1.1.1.1",
+        "port": 53,
+        "network": "tcp,udp"
+      }
+    }
+  ],
+  "outbounds": [
+    {
+      "tag": "blocked-until-configured",
+      "protocol": "blackhole",
+      "settings": {}
+    },
+    {
+      "tag": "direct",
+      "protocol": "freedom",
+      "settings": {},
+      "streamSettings": {
+        "sockopt": {
+          "domainStrategy": "UseIPv4"
+        }
+      }
+    },
+    {
+      "tag": "block",
+      "protocol": "blackhole",
+      "settings": {}
+    },
+    {
+      "tag": "dns-out",
+      "protocol": "dns",
+      "settings": {}
+    }
+  ],
+  "routing": {
+    "domainStrategy": "AsIs",
+    "rules": [
+      {
+        "type": "field",
+        "ruleTag": "DNS",
+        "inboundTag": [
+          "dns-in"
+        ],
+        "outboundTag": "dns-out"
+      },
+      {
+        "type": "field",
+        "ruleTag": "BENCHMARK",
+        "inboundTag": [
+          "benchmark-in"
+        ],
+        "outboundTag": "blocked-until-configured"
+      },
+      {
+        "type": "field",
+        "ruleTag": "Personal",
+        "domain": [
+          "domain:myteamspeak.ru",
+          "domain:myteamspeak.com",
+          "domain:papervpn.io",
+          "domain:blancvpn.com",
+          "domain:vpnguild.org",
+          "domain:ghfast.top",
+          "domain:habr.com",
+          "domain:cleanvoice.ru",
+          "domain:dreamerscast.com",
+          "domain:saveeditor.online",
+          "domain:movespeed.com",
+          "domain:jamisbikes.com",
+          "full:plata.careers"
+        ],
+        "outboundTag": "blocked-until-configured"
+      },
+      {
+        "type": "field",
+        "ruleTag": "Ads",
+        "domain": [
+          "geosite:category-ads-all"
+        ],
+        "outboundTag": "block"
+      },
+      {
+        "type": "field",
+        "ruleTag": "LAN",
+        "ip": [
+          "geoip:private"
+        ],
+        "outboundTag": "direct"
+      },
+      {
+        "type": "field",
+        "ruleTag": "Russia exceptions",
+        "domain": [
+          "domain:avito.ru",
+          "domain:perekrestok.ru"
+        ],
+        "outboundTag": "direct"
+      },
+      {
+        "type": "field",
+        "ruleTag": "Russia",
+        "domain": [
+          "geosite:category-gov-ru",
+          "geosite:category-ru"
+        ],
+        "outboundTag": "direct"
+      },
+      {
+        "type": "field",
+        "ruleTag": "Russia IP",
+        "ip": [
+          "geoip:ru"
+        ],
+        "outboundTag": "direct"
+      },
+      {
+        "type": "field",
+        "ruleTag": "Speedtest",
+        "domain": [
+          "geosite:speedtest",
+          "geosite:ookla-speedtest",
+          "geosite:category-speedtest"
+        ],
+        "outboundTag": "blocked-until-configured"
+      },
+      {
+        "type": "field",
+        "ruleTag": "IP Check",
+        "domain": [
+          "domain:2ip.io",
+          "domain:2ip.ru",
+          "domain:ipinfo.io",
+          "domain:ip-api.com",
+          "domain:ip.sb",
+          "domain:ipify.org",
+          "domain:ident.me",
+          "domain:icanhazip.com",
+          "domain:ipleak.net",
+          "domain:myip.com",
+          "domain:myexternalip.com",
+          "domain:whatismyip.com",
+          "domain:whatismyipaddress.com"
+        ],
+        "outboundTag": "blocked-until-configured"
+      },
+      {
+        "type": "field",
+        "ruleTag": "Google",
+        "domain": [
+          "geosite:google"
+        ],
+        "outboundTag": "blocked-until-configured"
+      },
+      {
+        "type": "field",
+        "ruleTag": "YouTube",
+        "domain": [
+          "geosite:youtube"
+        ],
+        "outboundTag": "blocked-until-configured"
+      },
+      {
+        "type": "field",
+        "ruleTag": "Google Scholar",
+        "domain": [
+          "geosite:google-scholar"
+        ],
+        "outboundTag": "blocked-until-configured"
+      },
+      {
+        "type": "field",
+        "ruleTag": "AI",
+        "domain": [
+          "geosite:openai",
+          "geosite:google-gemini",
+          "geosite:anthropic",
+          "domain:x.ai",
+          "domain:grok.com",
+          "domain:claude.ai",
+          "domain:chatgpt.com"
+        ],
+        "outboundTag": "blocked-until-configured"
+      },
+      {
+        "type": "field",
+        "ruleTag": "GitHub",
+        "domain": [
+          "geosite:github"
+        ],
+        "outboundTag": "blocked-until-configured"
+      },
+      {
+        "type": "field",
+        "ruleTag": "Microsoft",
+        "domain": [
+          "geosite:microsoft"
+        ],
+        "outboundTag": "blocked-until-configured"
+      },
+      {
+        "type": "field",
+        "ruleTag": "Apple",
+        "domain": [
+          "geosite:apple"
+        ],
+        "outboundTag": "blocked-until-configured"
+      },
+      {
+        "type": "field",
+        "ruleTag": "Telegram",
+        "domain": [
+          "geosite:telegram"
+        ],
+        "outboundTag": "blocked-until-configured"
+      },
+      {
+        "type": "field",
+        "ruleTag": "Telegram IP",
+        "ip": [
+          "geoip:telegram"
+        ],
+        "outboundTag": "blocked-until-configured"
+      },
+      {
+        "type": "field",
+        "ruleTag": "Discord ru",
+        "domain": [
+          "regexp:(?i)discord.*\\.ru$"
+        ],
+        "outboundTag": "direct"
+      },
+      {
+        "type": "field",
+        "ruleTag": "Discord",
+        "domain": [
+          "keyword:discord"
+        ],
+        "outboundTag": "blocked-until-configured"
+      },
+      {
+        "type": "field",
+        "ruleTag": "Discord voice",
+        "ip": [
+          "34.0.192.0/18",
+          "35.192.0.0/11",
+          "66.22.192.0/18"
+        ],
+        "network": "udp",
+        "port": "50000-50100",
+        "outboundTag": "blocked-until-configured"
+      },
+      {
+        "type": "field",
+        "ruleTag": "Social",
+        "domain": [
+          "geosite:facebook",
+          "geosite:instagram",
+          "geosite:twitter",
+          "geosite:x",
+          "geosite:threads",
+          "geosite:linkedin"
+        ],
+        "outboundTag": "blocked-until-configured"
+      },
+      {
+        "type": "field",
+        "ruleTag": "Media",
+        "domain": [
+          "geosite:netflix",
+          "geosite:tiktok",
+          "geosite:twitch",
+          "geosite:spotify",
+          "geosite:tidal"
+        ],
+        "outboundTag": "blocked-until-configured"
+      },
+      {
+        "type": "field",
+        "ruleTag": "Steam",
+        "domain": [
+          "geosite:steam"
+        ],
+        "outboundTag": "direct"
+      },
+      {
+        "type": "field",
+        "ruleTag": "OneDrive",
+        "domain": [
+          "geosite:onedrive"
+        ],
+        "outboundTag": "blocked-until-configured"
+      },
+      {
+        "type": "field",
+        "ruleTag": "iCloud",
+        "domain": [
+          "geosite:icloud"
+        ],
+        "outboundTag": "blocked-until-configured"
+      },
+      {
+        "type": "field",
+        "ruleTag": "Global",
+        "domain": [
+          "geosite:amazon",
+          "geosite:cloudflare",
+          "geosite:fastly",
+          "geosite:akamai",
+          "geosite:intel",
+          "geosite:notion"
+        ],
+        "outboundTag": "blocked-until-configured"
+      },
+      {
+        "type": "field",
+        "ruleTag": "Adult",
+        "domain": [
+          "geosite:category-porn"
+        ],
+        "outboundTag": "blocked-until-configured"
+      },
+      {
+        "type": "field",
+        "ruleTag": "Other",
+        "network": "tcp,udp",
+        "outboundTag": "direct"
+      }
+    ]
+  }
 }

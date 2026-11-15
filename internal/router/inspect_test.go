@@ -36,7 +36,11 @@ func (f *fakeTransport) Run(_ context.Context, c string) (Result, error) {
 	case archProbe:
 		return Result{Stdout: []byte(f.arch)}, nil
 	case endianProbe:
-		return Result{Stdout: []byte(" 127 69 76 70 1 1")}, nil
+		output := f.endian
+		if output == "" {
+			output = "0000000 177 105 114 106 001 001\n0000006\n"
+		}
+		return Result{Stdout: []byte(output)}, nil
 	case activeCoreProbe:
 		return Result{}, nil
 	case versionProbe:
@@ -235,7 +239,7 @@ type bigEndianTransport struct{ *fakeTransport }
 
 func (f bigEndianTransport) Run(ctx context.Context, c string) (Result, error) {
 	if c == endianProbe {
-		return Result{Stdout: []byte(" 127 69 76 70 1 2")}, nil
+		return Result{Stdout: []byte("0000000 177 105 114 106 001 002\n0000006\n")}, nil
 	}
 	return f.fakeTransport.Run(ctx, c)
 }
@@ -245,5 +249,45 @@ func TestInspectBigEndianMIPS(t *testing.T) {
 	s, err := Inspect(context.Background(), bigEndianTransport{f})
 	if err != nil || string(s.Arch) != "mips" {
 		t.Fatal(s, err)
+	}
+}
+
+func TestInspectBusyBoxEndianProbe(t *testing.T) {
+	for _, tc := range []struct {
+		name, output, want string
+	}{
+		{"little-endian ELF32", "0000000 177 105 114 106 001 001\n0000006\n", "mipsel"},
+		{"big-endian ELF32", "0000000 177 105 114 106 001 002\n0000006\n", "mips"},
+		{"little-endian ELF64", "0000000 177 105 114 106 002 001\n0000006\n", "mipsel"},
+		{"big-endian ELF64", "0000000 177 105 114 106 002 002\n0000006\n", "mips"},
+		{"whitespace", "  0000000\t177 105 114 106 001 001 \n 0000006 \n", "mipsel"},
+		{"truncated", "0000000 177 105 114 106 001\n0000005\n", ""},
+		{"extra byte", "0000000 177 105 114 106 001 001 000\n0000007\n", ""},
+		{"bad magic", "0000000 176 105 114 106 001 001\n0000006\n", ""},
+		{"bad class", "0000000 177 105 114 106 003 001\n0000006\n", ""},
+		{"bad byte order", "0000000 177 105 114 106 001 003\n0000006\n", ""},
+		{"non-octal byte", "0000000 177 105 114 106 001 008\n0000006\n", ""},
+		{"overflow byte", "0000000 177 105 114 106 001 401\n0000006\n", ""},
+		{"bad start offset", "0000001 177 105 114 106 001 001\n0000006\n", ""},
+		{"bad end offset", "0000000 177 105 114 106 001 001\n0000007\n", ""},
+		{"missing end offset", "0000000 177 105 114 106 001 001\n", ""},
+		{"decimal format", "127 69 76 70 1 1", ""},
+		{"usage error", "Usage: od [-abcdeFfhiloxsv] [FILE]", ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			f := fixture()
+			f.arch, f.endian = "mips", tc.output
+			s, err := Inspect(context.Background(), f)
+			if tc.want == "" {
+				if err == nil {
+					t.Fatal("accepted unverified executable byte order")
+				}
+			} else if err != nil || string(s.Arch) != tc.want {
+				t.Fatalf("got arch %q, error %v; want %q", s.Arch, err, tc.want)
+			}
+			if f.writes != 0 {
+				t.Fatal("endian detection mutated router")
+			}
+		})
 	}
 }

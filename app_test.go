@@ -14,6 +14,7 @@ import (
 	"github.com/Arap919/xkeen-installer/internal/config"
 	"github.com/Arap919/xkeen-installer/internal/install"
 	"github.com/Arap919/xkeen-installer/internal/router"
+	"github.com/Arap919/xkeen-installer/internal/verify"
 )
 
 func testApp() *App {
@@ -31,6 +32,31 @@ func testApp() *App {
 	}
 	a.emit = func(Progress) {}
 	return a
+}
+
+func TestInspectionFailuresAreActionableAndRedacted(t *testing.T) {
+	for _, tc := range []struct {
+		err  error
+		want string
+	}{
+		{errors.New("ssh: handshake failed: ssh: unable to authenticate, password=private"), "[SSH_AUTH]"},
+		{context.DeadlineExceeded, "[SSH_TIMEOUT]"},
+		{errors.New("private transport output"), "[SSH_CONNECT]"},
+	} {
+		got := connectionFailure(tc.err).Error()
+		if !strings.Contains(got, tc.want) || strings.Contains(got, "private") {
+			t.Fatal(got)
+		}
+	}
+	if got := inspectionFailure(router.ErrNotPOSIXShell).Error(); !strings.Contains(got, "[SSH_SHELL]") {
+		t.Fatal(got)
+	}
+	if got := inspectionFailure(router.ErrUnsupportedCPU).Error(); !strings.Contains(got, "[SSH_ARCH]") {
+		t.Fatal(got)
+	}
+	if got := inspectionFailure(errors.New("password=private")).Error(); !strings.Contains(got, "[SSH_INSPECT]") || strings.Contains(got, "private") {
+		t.Fatal(got)
+	}
 }
 
 func TestPlanRequiresCurrentInspection(t *testing.T) {
@@ -186,5 +212,91 @@ func TestHostKeyReplacementAndImplicitTrustAreBlocked(t *testing.T) {
 	}
 	if _, err := a.ApplyTrust("unknown", true); err == nil {
 		t.Fatal("unreviewed trust action accepted")
+	}
+}
+
+func TestPreparePlanPreservesSubscriptionDiagnostic(t *testing.T) {
+	for _, legacy := range []bool{false, true} {
+		a := testApp()
+		r := PlanRequest{InspectionID: "inspection", Cores: []string{"mihomo"}, ActiveCore: "mihomo", MihomoProviderURLs: []string{"http://private.test/secret"}}
+		if legacy {
+			r.ProviderURL = r.MihomoProviderURLs[0]
+			r.MihomoProviderURLs = nil
+		}
+		_, err := a.PreparePlan(r)
+		if err == nil || err.Error() != "[SUBSCRIPTION/MIHOMO/URL/HTTP/1/0]" {
+			t.Fatal(err)
+		}
+	}
+}
+
+func TestPlanInputDiagnostics(t *testing.T) {
+	for _, tc := range []struct {
+		r    PlanRequest
+		want string
+	}{
+		{PlanRequest{ImportText: strings.Repeat("a", config.MaxImportBytes+1)}, "[PLAN/INPUT/FILE_SIZE]"},
+		{PlanRequest{ImportText: "{}", MihomoProviderURLs: []string{"https://private.test/key"}}, "[PLAN/INPUT/MIXED_SOURCES]"},
+		{PlanRequest{ProviderURL: "https://private.test/key", MihomoProviderURLs: []string{"https://private.test/key"}}, "[PLAN/INPUT/DUPLICATE]"},
+		{PlanRequest{ProviderURL: strings.Repeat("a", 8193), Cores: []string{"mihomo"}}, "[SUBSCRIPTION/MIHOMO/URL/LENGTH/1/0]"},
+		{PlanRequest{MihomoProviderURLs: []string{"https://private.test/key"}}, "[SUBSCRIPTION/MIHOMO/SELECTION/CORE_MISSING/1/0]"},
+		{PlanRequest{XrayProviderURLs: []string{"https://private.test/key"}}, "[SUBSCRIPTION/XRAY/SELECTION/CORE_MISSING/1/0]"},
+	} {
+		a := testApp()
+		tc.r.InspectionID = "inspection"
+		_, err := a.PreparePlan(tc.r)
+		if err == nil || err.Error() != tc.want {
+			t.Fatalf("want %s, got %v", tc.want, err)
+		}
+	}
+}
+func TestConfigurationPlanDiagnosticIsExactAndRedacted(t *testing.T) {
+	for _, tc := range []struct{ message, want string }{{"invalid core selection", "CORE_SELECTION"}, {"invalid Mihomo YAML mapping", "MIHOMO_YAML"}, {"generate API secret", "API_SECRET"}, {"invalid core selection: private-token", "INTERNAL"}, {"https://private.test/key", "INTERNAL"}} {
+		got := configurationPlanDiagnostic(errors.New(tc.message))
+		if got != "[PLAN/CONFIGURATION/"+tc.want+"]" {
+			t.Fatal(got)
+		}
+	}
+}
+func TestPlanStateDiagnostics(t *testing.T) {
+	a := testApp()
+	a.busy = true
+	if _, err := a.PreparePlan(PlanRequest{InspectionID: "inspection"}); err == nil || err.Error() != "[PLAN/STATE/BUSY]" {
+		t.Fatal(err)
+	}
+	a.busy = false
+	if _, err := a.PreparePlan(PlanRequest{InspectionID: "older"}); err == nil || err.Error() != "[PLAN/INSPECTION/STALE]" {
+		t.Fatal(err)
+	}
+	a.inspectedAt = time.Now().Add(-10 * time.Minute)
+	if _, err := a.PreparePlan(PlanRequest{InspectionID: "inspection"}); err == nil || err.Error() != "[PLAN/INSPECTION/STALE]" {
+		t.Fatal(err)
+	}
+}
+
+func TestVerifiedPanelReadyRequiresAllChecks(t *testing.T) {
+	for _, state := range []verify.State{verify.Failed, verify.Pending, verify.NotApplicable, ""} {
+		for _, field := range []string{"api", "https", "trust"} {
+			s := verify.ServiceReport{Component: catalog.UI, API: verify.Check{State: verify.Passed}, HTTPS: verify.Check{State: verify.Passed}, Trust: verify.Check{State: verify.Passed}}
+			switch field {
+			case "api":
+				s.API.State = state
+			case "https":
+				s.HTTPS.State = state
+			case "trust":
+				s.Trust.State = state
+			}
+			if verifiedPanelReady(s) {
+				t.Fatalf("panel exposed with %s=%q", field, state)
+			}
+		}
+	}
+	s := verify.ServiceReport{Component: catalog.UI, API: verify.Check{State: verify.Passed}, HTTPS: verify.Check{State: verify.Passed}, Trust: verify.Check{State: verify.Passed}}
+	if !verifiedPanelReady(s) {
+		t.Fatal("verified UI withheld")
+	}
+	s.Component = catalog.Mihomo
+	if verifiedPanelReady(s) {
+		t.Fatal("non-UI accepted")
 	}
 }

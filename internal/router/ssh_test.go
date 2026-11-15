@@ -20,6 +20,26 @@ import (
 )
 
 func sshFixture(t *testing.T, shellOnly ...bool) (string, ssh.Signer) {
+	return sshFixtureWithStat(t, busyBoxStatFixture, shellOnly...)
+}
+
+// This fixture models BusyBox builds without FEATURE_STAT_FORMAT on every host.
+const busyBoxStatFixture = `#!/usr/bin/env python3
+import os, sys
+if len(sys.argv) != 3 or sys.argv[1] != '-t':
+    sys.exit(1)
+p = sys.argv[2]
+try:
+    s = os.lstat(p)
+except OSError:
+    sys.exit(1)
+print('%s %d %d %x %d %d %x %d %d %d %d %d %d %d %d' % (
+    p, s.st_size, s.st_blocks, s.st_mode, s.st_uid, s.st_gid,
+    s.st_dev, s.st_ino, s.st_nlink, 0, 0,
+    int(s.st_atime), int(s.st_mtime), int(s.st_ctime), s.st_blksize))
+`
+
+func sshFixtureWithStat(t *testing.T, statScript string, shellOnly ...bool) (string, ssh.Signer) {
 	t.Helper()
 	shellMode := len(shellOnly) > 0 && shellOnly[0]
 	if shellMode && runtime.GOOS == "windows" {
@@ -27,7 +47,17 @@ func sshFixture(t *testing.T, shellOnly ...bool) (string, ssh.Signer) {
 	}
 	truncateWrites := len(shellOnly) > 1 && shellOnly[1]
 	shellRoot := t.TempDir()
+	binDir := filepath.Join(shellRoot, "bin")
 	if shellMode {
+		if _, err := exec.LookPath("python3"); err != nil {
+			t.Fatal("BusyBox stat fixture requires python3:", err)
+		}
+		if err := os.Mkdir(binDir, 0700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(binDir, "stat"), []byte(statScript), 0700); err != nil {
+			t.Fatal(err)
+		}
 		if err := os.Mkdir(filepath.Join(shellRoot, "opt"), 0700); err != nil {
 			t.Fatal(err)
 		}
@@ -98,11 +128,8 @@ func sshFixture(t *testing.T, shellOnly ...bool) (string, ssh.Signer) {
 								r.Reply(true, nil)
 								if shellMode {
 									script := strings.ReplaceAll(command.Command, "'/opt", "'"+filepath.Join(shellRoot, "opt"))
-									if runtime.GOOS == "darwin" {
-										script = strings.ReplaceAll(script, "stat -c '%a %s' --", "stat -f '%Lp %z'")
-										script = strings.ReplaceAll(script, "stat -c '%s' --", "stat -f '%z'")
-									}
 									cmd := exec.Command("/bin/sh", "-c", script)
+									cmd.Env = append(os.Environ(), "PATH="+binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
 									cmd.Dir = shellRoot
 									cmd.Stdin = channel
 									if truncateWrites && strings.Contains(command.Command, "(set -C; cat > ") {

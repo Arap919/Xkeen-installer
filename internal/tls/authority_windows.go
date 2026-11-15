@@ -3,17 +3,26 @@
 package tls
 
 import (
+	"bytes"
 	"errors"
 	"io/fs"
 	"os"
 	"path/filepath"
+	"runtime"
+	"unsafe"
 
 	"golang.org/x/sys/windows"
 )
 
 // Protect newly created application-owned paths using an explicit non-inherited
 // current-user/SYSTEM DACL. Existing paths must already carry this exact DACL.
-func privatePath(path string, dir, created bool) error {
+func privatePath(path string, dir, created bool) (failure error) {
+	operation := "WINDOWS_TOKEN"
+	defer func() {
+		if failure != nil {
+			failure = &StorageError{Operation: operation, cause: failure}
+		}
+	}()
 	user, e := windows.GetCurrentProcessToken().GetTokenUser()
 	if e != nil {
 		return errStorage
@@ -23,6 +32,7 @@ func privatePath(path string, dir, created bool) error {
 		flags = "OICI"
 	}
 	sddl := "D:P(A;" + flags + ";FA;;;SY)(A;" + flags + ";FA;;;" + user.User.Sid.String() + ")"
+	operation = "WINDOWS_DACL_BUILD"
 	expected, e := windows.SecurityDescriptorFromString(sddl)
 	if e != nil {
 		return errStorage
@@ -32,13 +42,19 @@ func privatePath(path string, dir, created bool) error {
 		return errStorage
 	}
 	if created {
+		operation = "WINDOWS_DACL_SET"
 		e = windows.SetNamedSecurityInfo(path, windows.SE_FILE_OBJECT, windows.DACL_SECURITY_INFORMATION|windows.PROTECTED_DACL_SECURITY_INFORMATION, nil, nil, acl, nil)
 		if e != nil {
 			return errStorage
 		}
 	}
+	operation = "WINDOWS_DACL_READ"
 	actual, e := windows.GetNamedSecurityInfo(path, windows.SE_FILE_OBJECT, windows.DACL_SECURITY_INFORMATION)
-	if e != nil || actual.String() != expected.String() {
+	if e != nil {
+		return errStorage
+	}
+	operation = "WINDOWS_DACL_COMPARE"
+	if !samePrivateDACL(actual, expected) {
 		return errStorage
 	}
 	return nil
@@ -101,7 +117,7 @@ func saveLocation(dir string, names []string) (string, error) {
 		return "", errStorage
 	}
 	if e = privatePath(stage, true, true); e != nil {
-		return "", errStorage
+		return "", e
 	}
 	return stage, nil
 }
@@ -121,3 +137,49 @@ func publishStore(stage, dir string) error {
 	return nil
 }
 func syncStore(r *os.Root, _ string) error { return syncStoreFiles(r) }
+
+// Compare access rules rather than SDDL formatting/control metadata such as AI.
+// Require protected non-null DACLs with exactly the reviewed allow ACEs; only
+// ACE ordering may differ. Masks, inheritance flags and SID bytes remain exact.
+func samePrivateDACL(actual, expected *windows.SECURITY_DESCRIPTOR) bool {
+	control, _, err := actual.Control()
+	if err != nil || control&windows.SE_DACL_PROTECTED == 0 || control&windows.SE_DACL_PRESENT == 0 {
+		return false
+	}
+	a, _, err := actual.DACL()
+	if err != nil || a == nil {
+		return false
+	}
+	e, _, err := expected.DACL()
+	if err != nil || e == nil || e.AceCount != 2 || a.AceCount != e.AceCount {
+		return false
+	}
+	matched := make([]bool, int(e.AceCount))
+	for i := uint32(0); i < uint32(a.AceCount); i++ {
+		var ace *windows.ACCESS_ALLOWED_ACE
+		if windows.GetAce(a, i, &ace) != nil || ace == nil || ace.Header.AceType != windows.ACCESS_ALLOWED_ACE_TYPE || ace.Header.AceSize < 8 || ace.Header.AceSize > 1024 {
+			return false
+		}
+		found := false
+		for j := uint32(0); j < uint32(e.AceCount); j++ {
+			if matched[j] {
+				continue
+			}
+			var want *windows.ACCESS_ALLOWED_ACE
+			if windows.GetAce(e, j, &want) != nil || want == nil {
+				return false
+			}
+			if ace.Header.AceSize == want.Header.AceSize && bytes.Equal(unsafe.Slice((*byte)(unsafe.Pointer(ace)), int(ace.Header.AceSize)), unsafe.Slice((*byte)(unsafe.Pointer(want)), int(want.Header.AceSize))) {
+				matched[j] = true
+				found = true
+				break
+			}
+		}
+		if !found {
+			return false
+		}
+	}
+	runtime.KeepAlive(actual)
+	runtime.KeepAlive(expected)
+	return true
+}

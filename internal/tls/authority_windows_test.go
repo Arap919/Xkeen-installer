@@ -47,7 +47,7 @@ func TestWindowsPrivateStorageDACL(t *testing.T) {
 			t.Fatal(path, err)
 		}
 		expected := storageDACL(t, name == "", false)
-		if actual.String() != expected.String() {
+		if !samePrivateDACL(actual, expected) {
 			t.Fatalf("storage DACL differs from protected current-user/SYSTEM policy: %s", path)
 		}
 	}
@@ -88,6 +88,44 @@ func TestWindowsPermissiveStorageDACLRejected(t *testing.T) {
 			}
 			if err := p.ReadyForDeployment(); err == nil {
 				t.Fatal("permissive storage retained deployment evidence")
+			}
+		})
+	}
+}
+
+func TestWindowsPrivateDACLSemanticComparison(t *testing.T) {
+	user, err := windows.GetCurrentProcessToken().GetTokenUser()
+	if err != nil {
+		t.Fatal(err)
+	}
+	sid := user.User.Sid.String()
+	system := "(A;OICI;FA;;;SY)"
+	owner := "(A;OICI;FA;;;" + sid + ")"
+	expected, err := windows.SecurityDescriptorFromString("D:P" + system + owner)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct {
+		name, sddl string
+		want       bool
+	}{
+		{"same", "D:P" + system + owner, true},
+		{"auto-inheritance metadata", "D:PAI" + system + owner, true},
+		{"reordered allow entries", "D:P" + owner + system, true},
+		{"unprotected", "D:" + system + owner, false},
+		{"extra reader", "D:P" + system + owner + "(A;OICI;FR;;;WD)", false},
+		{"missing user", "D:P" + system, false},
+		{"duplicate system", "D:P" + system + system, false},
+		{"different mask", "D:P" + system + "(A;OICI;FR;;;" + sid + ")", false},
+		{"different inheritance", "D:P" + system + "(A;;FA;;;" + sid + ")", false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			actual, err := windows.SecurityDescriptorFromString(tc.sddl)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got := samePrivateDACL(actual, expected); got != tc.want {
+				t.Fatalf("got %v want %v", got, tc.want)
 			}
 		})
 	}

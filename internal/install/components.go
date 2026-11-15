@@ -194,6 +194,24 @@ func decodeArtifact(a catalog.Artifact, b []byte) ([]payload, error) {
 			if !f.Mode().IsRegular() {
 				return nil, errors.New("special zip member")
 			}
+			if n == "geoip.dat" || n == "geosite.dat" {
+				r, e := f.Open()
+				if e != nil {
+					return nil, errors.New("invalid geodata")
+				}
+				data, e := boundedRead(r)
+				ce := r.Close()
+				if e != nil || ce != nil || len(data) == 0 {
+					return nil, errors.New("invalid geodata")
+				}
+				for _, old := range out {
+					if old.path == "/opt/etc/xray/dat/"+n {
+						return nil, errors.New("duplicate geodata")
+					}
+				}
+				add("/opt/etc/xray/dat/"+n, data, 0644)
+				continue
+			}
 			if n != "xray" {
 				continue
 			}

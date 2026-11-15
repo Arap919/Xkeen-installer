@@ -156,14 +156,19 @@ func BuildPlan(s router.Snapshot, selection Selection, proposal config.ConfigPro
 			seen[p] = true
 		}
 	}
-	if selection.Config.Watchdog {
-		if active != catalog.Mihomo || len(s.CronInit) != 1 || s.CronInit[0] != "/opt/etc/init.d/S10cron" {
-			return fail("Watchdog требует активный совместимый Mihomo и проверенный S10cron; настройте cron вручную")
+	for _, init := range s.CronInit {
+		if init != "/opt/etc/init.d/S10cron" {
+			return fail("Обнаружен конфликтующий cron init; требуется ручная проверка")
 		}
-		for _, f := range s.Files {
-			if f.Path == "/opt/etc/init.d/S10cron" && f.Mode.Perm()&0111 == 0 {
-				return fail("Скрипт cron не исполняемый; требуется ручная проверка")
-			}
+	}
+	for _, f := range s.Files {
+		if f.Path == "/opt/etc/init.d/S10cron" && f.Mode.Perm()&0111 == 0 {
+			return fail("Скрипт cron не исполняемый")
+		}
+	}
+	if selection.Config.Watchdog {
+		if active != catalog.Mihomo {
+			return fail("Watchdog требует активный Mihomo")
 		}
 		b, ok := proposal.File(config.MihomoPath)
 		if !ok {
@@ -195,6 +200,28 @@ func BuildPlan(s router.Snapshot, selection Selection, proposal config.ConfigPro
 		}
 		d.configs = append(d.configs, payload{path: config.WatchdogPath, data: got, mode: mode, preserve: exists})
 		seen[config.WatchdogPath] = true
+	}
+	if sources, ok := proposal.File(config.XraySourcesPath); ok {
+		if !selected[catalog.Xray] {
+			return fail("Подписки Xray требуют выбранное ядро")
+		}
+		managed, e := config.ManagedSubscriptionFiles(sources)
+		if e != nil {
+			return fail("Некорректные данные подписок")
+		}
+		for path, want := range managed {
+			got, ok := proposal.File(path)
+			if !ok || !bytes.Equal(want, got) {
+				return fail("Управляемые файлы подписок не согласованы")
+			}
+			old, exists := s.Config(path)
+			if exists && !bytes.Equal(old, got) {
+				return fail("Существующие файлы подписок должны быть сохранены")
+			}
+			d.configs = append(d.configs, payload{path: path, data: got, mode: 0600, preserve: exists})
+			seen[path] = true
+		}
+		d.subscriptions = true
 	}
 	for _, f := range proposal.Files {
 		if !seen[f.Path] {
@@ -274,9 +301,12 @@ func BuildPlan(s router.Snapshot, selection Selection, proposal config.ConfigPro
 	if selection.Config.Watchdog {
 		components = append(components, catalog.Watchdog)
 	}
-	p := Plan{ActiveCore: active, Dependencies: []string{"curl", "jq", "ip-full", "iptables", "ipset", "ca-bundle", "coreutils-uname", "coreutils-nohup", "conntrack"}}
+	p := Plan{ActiveCore: active, Dependencies: []string{"curl", "jq", "ip-full", "iptables", "ipset", "ca-bundle", "coreutils-uname", "coreutils-nohup", "conntrack", "cron"}}
 	if selection.UI {
 		p.Notes = append(p.Notes, fmt.Sprintf("Проверен TCP-порт панели: %d; перед записью проверка будет повторена", d.uiPort))
+	}
+	if d.subscriptions {
+		p.Dependencies = append(p.Dependencies, "python3", "ca-certificates")
 	}
 	if selection.Config.Watchdog {
 		p.Dependencies = append(p.Dependencies, "python3", "python3-yaml", "wget-ssl")
@@ -295,6 +325,16 @@ func BuildPlan(s router.Snapshot, selection Selection, proposal config.ConfigPro
 		target := map[catalog.Component]string{catalog.XKeen: "/opt/sbin/xkeen + /opt/sbin/.xkeen/", catalog.Mihomo: "/opt/sbin/mihomo", catalog.Xray: "/opt/sbin/xray", catalog.Yq: "/opt/sbin/yq", catalog.UI: "/opt/sbin/xkeen-ui", catalog.Watchdog: "IPK: /opt/bin/router-watchdog + /opt/libexec/router-watchdog/ + /opt/etc/cron.1min/router-watchdog"}[a.Component]
 		p.Changes = append(p.Changes, FileChange{target, "Установить закреплённый артефакт " + a.Version, "0755 (IPK: штатные права пакета)"})
 	}
+	if selected[catalog.Xray] {
+		for _, name := range []string{"geoip.dat", "geosite.dat"} {
+			action := "Создать из проверенного архива Xray"
+			if _, ok := s.Config("/opt/etc/xray/dat/" + name); ok {
+				action = "Сохранить существующий файл"
+			}
+			p.Changes = append(p.Changes, FileChange{"/opt/etc/xray/dat/" + name, action, "0644 (существующие права сохраняются)"})
+		}
+	}
+	p.Changes = append(p.Changes, FileChange{"/opt/etc/init.d/S10cron", "Установить через opkg, запустить и проверить /opt/sbin/cron", "Штатные права пакета"})
 	for _, f := range d.configs {
 		action := "Создать"
 		if f.preserve {
@@ -331,6 +371,10 @@ func BuildPlan(s router.Snapshot, selection Selection, proposal config.ConfigPro
 		return fail("Недостаточно места для установки и резервной копии")
 	}
 	p.Steps = []Step{{"download", "Загрузить закреплённые версии и проверить SHA256 и архитектуру"}, {"reinspect", "Повторно проверить конфигурации, пакеты и активное ядро"}, {"backup", "Создать закрытую резервную копию и проверить чтением"}, {"dependencies", "Обновить индекс opkg и установить только перечисленные зависимости"}, {"stop", "Остановить выбранную службу перед заменой файлов"}, {"install", "Установить проверенные бинарные файлы и модули; сохранить настройки"}, {"configure", "Создать только отсутствующие конфигурации"}, {"validate", "Проверить установленные байты, версии и конфигурацию штатным валидатором"}, {"activate", "Запустить выбранное ядро и проверить процесс"}}
+	p.Steps = append(p.Steps, Step{"cron", "Запустить S10cron и проверить точный исполняемый файл процесса"})
+	if d.subscriptions {
+		p.Steps = append(p.Steps, Step{"subscriptions", "Включить обновление подписок каждые 12 часов"})
+	}
 	if selection.Config.Watchdog {
 		p.Steps = append(p.Steps, Step{"watchdog", "Установить проверенный IPK штатными hooks и согласовать cron"})
 	}
@@ -370,5 +414,23 @@ func unconfiguredXrayBase(data []byte) bool {
 	}
 	actualJSON, _ := json.Marshal(actualValue)
 	baseJSON, _ := json.Marshal(baseValue)
-	return bytes.Equal(actualJSON, baseJSON)
+	if bytes.Equal(actualJSON, baseJSON) {
+		return true
+	}
+	// Keep recognizing the previous installer base without rewriting existing files.
+	const legacyBase = `{
+  "log": {"loglevel": "warning"},
+  "inbounds": [{"tag":"transparent-in", "listen":"0.0.0.0", "port":50080,
+    "protocol":"dokodemo-door", "settings":{"network":"tcp,udp", "followRedirect":true},
+    "streamSettings":{"sockopt":{"tproxy":"tproxy"}},
+    "sniffing":{"enabled":true,"destOverride":["http","tls"]}}],
+  "outbounds": [{"tag":"blocked-until-configured", "protocol":"blackhole", "settings":{}}]
+}
+`
+	var legacyValue any
+	if json.Unmarshal([]byte(legacyBase), &legacyValue) != nil {
+		return false
+	}
+	legacyJSON, _ := json.Marshal(legacyValue)
+	return bytes.Equal(actualJSON, legacyJSON)
 }

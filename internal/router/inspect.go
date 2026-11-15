@@ -15,14 +15,17 @@ import (
 
 const shellProbe = "printf 'XKEEN_SHELL_OK\\n'"
 const archProbe = "uname -m"
-const endianProbe = "od -An -tu1 -N6 /bin/sh"
+const endianProbe = "dd if=/bin/sh bs=1 count=6 2>/dev/null | od -b"
 const activeCoreProbe = "ps w"
 const versionProbe = "/opt/bin/opkg list-installed"
 
-var inventoryRoots = []string{"/opt/etc/xkeen", "/opt/etc/xray", "/opt/etc/mihomo", "/opt/etc/xkeen-ui", "/opt/etc/nginx/ssl", "/opt/etc/lighttpd/conf.d/90-xkeenui.conf", "/opt/etc/router-watchdog.json", "/opt/etc/router-watchdog.json-old", "/opt/etc/router-watchdog.json-upgrade", "/opt/etc/crontab", "/opt/etc/cron.1min", "/opt/etc/init.d", "/opt/share/www/XKeen-UI", "/opt/var/spool/cron", "/opt/lib/opkg/status", "/opt/etc/ndm/netfilter.d/proxy.sh", "/opt/etc/ndm/schedule.d/00-xkeen-hotspot-sync.sh"}
+var inventoryRoots = []string{"/opt/etc/xkeen-subscriptions", "/opt/libexec/xkeen-subscriptions", "/opt/etc/cron.d", "/opt/etc/xkeen", "/opt/etc/xray", "/opt/etc/mihomo", "/opt/etc/xkeen-ui", "/opt/etc/nginx/ssl", "/opt/etc/lighttpd/conf.d/90-xkeenui.conf", "/opt/etc/router-watchdog.json", "/opt/etc/router-watchdog.json-old", "/opt/etc/router-watchdog.json-upgrade", "/opt/etc/crontab", "/opt/etc/cron.1min", "/opt/etc/init.d", "/opt/share/www/XKeen-UI", "/opt/var/spool/cron", "/opt/lib/opkg/status", "/opt/etc/ndm/netfilter.d/proxy.sh", "/opt/etc/ndm/schedule.d/00-xkeen-hotspot-sync.sh"}
 
 const maxInventoryBytes = int64(64 << 20)
 const maxInventoryEntries = 10000
+
+var ErrNotPOSIXShell = errors.New("SSH endpoint is not a compatible POSIX shell")
+var ErrUnsupportedCPU = errors.New("unsupported CPU")
 
 type Snapshot struct {
 	Arch               catalog.RouterArch
@@ -51,7 +54,7 @@ func Inspect(ctx context.Context, t Transport) (Snapshot, error) {
 		return Snapshot{}, err
 	}
 	if r.ExitCode != 0 || string(r.Stdout) != "XKEEN_SHELL_OK\n" {
-		return Snapshot{}, errors.New("SSH endpoint is not a compatible POSIX shell")
+		return Snapshot{}, ErrNotPOSIXShell
 	}
 	r, err = t.Run(ctx, archProbe)
 	if err != nil {
@@ -73,20 +76,35 @@ func Inspect(ctx context.Context, t Transport) (Snapshot, error) {
 		if r.ExitCode != 0 {
 			return Snapshot{}, errors.New("cannot inspect MIPS byte order")
 		}
-		b := strings.Fields(string(r.Stdout))
-		if len(b) != 6 || strings.Join(b[:4], " ") != "127 69 76 70" {
+		fields := strings.Fields(string(r.Stdout))
+		if len(fields) != 8 {
 			return Snapshot{}, errors.New("unknown executable byte order")
 		}
-		switch b[5] {
-		case "1":
+		// BusyBox od -b prints an octal start offset, bytes, and final offset.
+		var values [8]uint64
+		for i, field := range fields {
+			if strings.IndexFunc(field, func(r rune) bool { return r < '0' || r > '7' }) >= 0 {
+				return Snapshot{}, errors.New("unknown executable byte order")
+			}
+			value, err := strconv.ParseUint(field, 8, 8)
+			if err != nil {
+				return Snapshot{}, errors.New("unknown executable byte order")
+			}
+			values[i] = value
+		}
+		if values[0] != 0 || values[7] != 6 || values[1] != 0x7f || values[2] != 'E' || values[3] != 'L' || values[4] != 'F' || (values[5] != 1 && values[5] != 2) {
+			return Snapshot{}, errors.New("unknown executable byte order")
+		}
+		switch values[6] {
+		case 1:
 			s.Arch = catalog.MIPSel
-		case "2":
+		case 2:
 			s.Arch = catalog.MIPS
 		default:
 			return Snapshot{}, errors.New("unknown executable byte order")
 		}
 	default:
-		return Snapshot{}, errors.New("unsupported CPU")
+		return Snapshot{}, ErrUnsupportedCPU
 	}
 	e, err := t.Stat(ctx, "/opt/bin/opkg")
 	if err == nil {

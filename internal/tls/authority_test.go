@@ -7,6 +7,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"reflect"
 	"runtime"
 	"strings"
 	"syscall"
@@ -223,5 +224,112 @@ func TestStoreDirectorySyncFailureCannotMintEvidence(t *testing.T) {
 	q, e := Load(dir, "router.test")
 	if e != nil || q.ReadyForDeployment() != nil {
 		t.Fatal("successful durable retry", e)
+	}
+}
+
+func TestTrustNativeCommandsAndPublicDescription(t *testing.T) {
+	p, err := PrepareTLS("router.test", TLSState{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	name := "CA space ' $(touch injected) `touch injected`"
+	if runtime.GOOS != "windows" {
+		name += ` "quoted"`
+	}
+	dir := filepath.Join(t.TempDir(), name)
+	if err := p.Save(dir); err != nil {
+		t.Fatal(err)
+	}
+	const script = `on run argv
+do shell script "/usr/bin/security add-trusted-cert -d -r trustRoot -k /Library/Keychains/System.keychain " & quoted form of (item 1 of argv) with administrator privileges
+end run`
+	for _, tc := range []struct {
+		platform, command, store string
+		args                     []string
+	}{
+		{"darwin", "/usr/bin/osascript", "System", []string{"-e", script, filepath.Join(dir, "ca.crt")}},
+		{"windows", "certutil", "CurrentUser Root", []string{"-user", "-addstore", "Root", filepath.Join(dir, "ca.crt")}},
+	} {
+		t.Run(tc.platform, func(t *testing.T) {
+			a, err := p.TrustAction(tc.platform, dir)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(a.commands) != 1 || a.commands[0].name != tc.command || !reflect.DeepEqual(a.commands[0].args, tc.args) {
+				t.Fatalf("unexpected command: %#v", a.commands)
+			}
+			if !strings.Contains(a.Description, tc.store) || !strings.Contains(a.Description, a.ID) || strings.Contains(a.Description, "без shell") || strings.Contains(a.Description, "add-trusted-cert") || strings.Contains(a.Description, "certutil") {
+				t.Fatal("unsafe or unfriendly description", a.Description)
+			}
+			if tc.platform == "darwin" && !strings.Contains(a.Description, "macOS") {
+				t.Fatal(a.Description)
+			}
+			f := &recordTrustCommands{}
+			result := ApplyTrust(context.Background(), a, a.ID, true, f)
+			if result.Status != TrustInstalled || result.Code != "verification_pending" || f.name != tc.command || !reflect.DeepEqual(f.args, tc.args) {
+				t.Fatal("unexpected application result", result, f)
+			}
+			f.failure = errors.New("private failure text")
+			result = ApplyTrust(context.Background(), a, a.ID, true, f)
+			if result.Status != TrustPending || result.Code != "command_failed" || strings.Contains(result.Detail, "private failure text") {
+				t.Fatal("command failure misreported", result)
+			}
+			if err := os.WriteFile(filepath.Join(dir, "ca.crt"), []byte("changed CA"), 0600); err != nil {
+				t.Fatal(err)
+			}
+			before := f.calls
+			result = ApplyTrust(context.Background(), a, a.ID, true, f)
+			if result.Status != TrustManual || result.Code != "ca_changed" || f.calls != before {
+				t.Fatal("changed CA executed", result)
+			}
+			if err := os.WriteFile(filepath.Join(dir, "ca.crt"), p.private.ca, 0600); err != nil {
+				t.Fatal(err)
+			}
+		})
+	}
+}
+
+type recordTrustCommands struct {
+	name    string
+	args    []string
+	calls   int
+	failure error
+}
+
+func (f *recordTrustCommands) LookPath(name string) (string, error) { return name, nil }
+func (f *recordTrustCommands) Run(_ context.Context, name string, args ...string) error {
+	f.calls++
+	f.name, f.args = name, append([]string(nil), args...)
+	return f.failure
+}
+
+func TestTrustContextFailureStages(t *testing.T) {
+	p, err := PrepareTLS("router.test", TLSState{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	dir := filepath.Join(t.TempDir(), "ca")
+	if err := p.Save(dir); err != nil {
+		t.Fatal(err)
+	}
+	a, err := p.TrustAction("darwin", dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cancelled, cancel := context.WithCancel(context.Background())
+	cancel()
+	expired, cleanup := context.WithTimeout(context.Background(), -1)
+	defer cleanup()
+	for _, tc := range []struct {
+		code string
+		ctx  context.Context
+	}{{"cancelled", cancelled}, {"timeout", expired}} {
+		t.Run(tc.code, func(t *testing.T) {
+			f := &recordTrustCommands{}
+			result := ApplyTrust(tc.ctx, a, a.ID, true, f)
+			if result.Status != TrustPending || result.Code != tc.code || f.calls != 0 {
+				t.Fatal("context failure misreported or command executed", result, f.calls)
+			}
+		})
 	}
 }

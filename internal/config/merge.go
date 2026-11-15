@@ -1,8 +1,11 @@
 package config
 
 import (
+	"bytes"
+	"crypto/sha256"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"path"
 	"strings"
 
@@ -46,9 +49,16 @@ func Prepare(s router.Snapshot, selection Selection, input Import) (ConfigPropos
 		if !cores[catalog.Mihomo] || input.localSet {
 			return p, errors.New("provider import requires Mihomo without local import")
 		}
-		if e := providerURL(input.providerURL); e != nil {
+		urls := input.providerURLs
+		if len(urls) == 0 {
+			urls = []string{input.providerURL}
+		}
+		if e := validateURLs(urls); e != nil {
 			return p, e
 		}
+	}
+	if len(input.xrayURLs) > 0 && (!cores[catalog.Xray] || input.localSet || len(input.xrayData) == 0) {
+		return p, errors.New("invalid Xray subscription input")
 	}
 	if selection.ActiveCore != "" {
 		if !cores[selection.ActiveCore] {
@@ -90,7 +100,7 @@ func Prepare(s router.Snapshot, selection Selection, input Import) (ConfigPropos
 			}
 		}
 		if existing {
-			if input.core == core && input.localSet || core == catalog.Mihomo && input.providerSet {
+			if input.core == core && input.localSet || core == catalog.Mihomo && input.providerSet || core == catalog.Xray && len(input.xrayURLs) > 0 {
 				p.conflict("", "Import would replace existing configuration; resolve manually.", "")
 			}
 			continue
@@ -101,7 +111,11 @@ func Prepare(s router.Snapshot, selection Selection, input Import) (ConfigPropos
 			if input.core == core && input.localSet {
 				b = input.data
 			} else if input.providerSet {
-				b, e = newMihomo(input.providerURL)
+				urls := input.providerURLs
+				if len(urls) == 0 {
+					urls = []string{input.providerURL}
+				}
+				b, e = newMihomoURLs(urls)
 			} else {
 				p.conflict(MihomoPath, "A nonempty provider URL or local Mihomo configuration is required.", "")
 				continue
@@ -114,14 +128,40 @@ func Prepare(s router.Snapshot, selection Selection, input Import) (ConfigPropos
 			b, _ := templates.ReadFile("templates/xray.json")
 			if input.core == core && input.localSet {
 				b = input.data
+			} else if len(input.xrayURLs) > 0 {
+				b = input.xrayData
+				sources, _ := json.Marshal(subscriptionSources{URLs: input.xrayURLs, ConfigSHA256: fmt.Sprintf("%x", sha256.Sum256(b))})
+				managed, err := ManagedSubscriptionFiles(sources)
+				if err != nil {
+					return p, err
+				}
+				for path, data := range managed {
+					p.add(path, data, "create")
+				}
 			} else {
-				p.conflict(XrayPath, "Add a user proxy outbound and routing before activation.", "Replace blocked-until-configured with the user connection and route transparent-in to it.")
+				p.conflict(XrayPath, "Add a user proxy outbound and routing before activation.", "Replace the blocked-until-configured outbound with the user proxy while retaining its tag; provide compatible geoip.dat and geosite.dat before native validation.")
 			}
 			p.add(XrayPath, b, "create")
 		}
 	}
+	if cores[catalog.Xray] {
+		if sources, exists := s.Config(XraySourcesPath); exists {
+			managed, e := ManagedSubscriptionFiles(sources)
+			if e != nil {
+				return p, e
+			}
+			for path, want := range managed {
+				old, ok := s.Config(path)
+				if !ok || !bytes.Equal(old, want) {
+					p.conflict(path, "Managed subscription files require manual reconciliation.", "")
+					continue
+				}
+				p.add(path, old, "preserve")
+			}
+		}
+	}
 	for _, f := range p.Files {
-		if f.Path == WatchdogPath || providerFiles[f.Path] {
+		if f.Path == WatchdogPath || f.Path == XraySourcesPath || f.Path == XrayUpdaterPath || f.Path == XraySchedulePath || providerFiles[f.Path] {
 			continue
 		}
 		core := "xray"
@@ -141,7 +181,7 @@ func Prepare(s router.Snapshot, selection Selection, input Import) (ConfigPropos
 		}
 		controller, secret, target, compatible := watchdogContract(m)
 		if !compatible {
-			p.conflict(MihomoPath, "Watchdog requires compatible provider-backed PROXY/BENCHMARK groups, API secret and dedicated ports; existing bytes preserved.", watchdogAddition())
+			p.conflict(MihomoPath, "Watchdog requires compatible provider-backed PROXY/BENCHMARK groups, API secret and dedicated ports; existing bytes preserved.", watchdogAddition(m))
 		} else {
 			desired := newWatchdog(controller, secret, target)
 			if old, ok := s.Config(WatchdogPath); ok {
@@ -156,7 +196,7 @@ func Prepare(s router.Snapshot, selection Selection, input Import) (ConfigPropos
 					}
 				}
 				if !compatible {
-					p.conflict(WatchdogPath, "Existing watchdog settings differ from the required Mihomo contract.", "controller: http://127.0.0.1:9090; secret: <Mihomo API secret>; target_group: PROXY; benchmark_group: BENCHMARK; benchmark_proxy: http://127.0.0.1:17890")
+					p.conflict(WatchdogPath, "Existing watchdog settings differ from the required Mihomo contract.", "controller: http://127.0.0.1:9090; secret: <Mihomo API secret>; target_group: "+target+"; benchmark_group: BENCHMARK; benchmark_proxy: http://127.0.0.1:17890")
 				}
 			} else {
 				p.add(WatchdogPath, desired, "create")
@@ -207,6 +247,10 @@ func referencedProxyData(s router.Snapshot) map[string]bool {
 	}
 	return out
 }
-func watchdogAddition() string {
-	return "Merge only missing entries into the corresponding sections; resolve occupied ports first:\nexternal-controller: 127.0.0.1:9090\nsecret: <private generated API secret>\nproxy-groups:\n  - name: PROXY\n    type: select\n    use: [<existing provider names>]\n  - name: BENCHMARK\n    type: select\n    use: [<same provider names>]\nlisteners:\n  - name: benchmark-in\n    type: http\n    listen: 127.0.0.1\n    port: 17890\n    proxy: BENCHMARK\n    users: []"
+func watchdogAddition(m map[string]any) string {
+	target := "PROXY"
+	if group(m, "Proxy") != nil {
+		target = "Proxy"
+	}
+	return strings.ReplaceAll("Merge only missing entries into the corresponding sections; resolve occupied ports first:\nexternal-controller: 127.0.0.1:9090\nsecret: <private generated API secret>\nproxy-groups:\n  - name: PROXY\n    type: select\n    use: [<existing provider names>]\n  - name: BENCHMARK\n    type: select\n    use: [<same provider names>]\nlisteners:\n  - name: benchmark-in\n    type: http\n    listen: 127.0.0.1\n    port: 17890\n    proxy: BENCHMARK\n    users: []", "PROXY", target)
 }

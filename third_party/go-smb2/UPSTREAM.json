@@ -1,0 +1,232 @@
+{
+  "module": "github.com/cloudsoda/go-smb2",
+  "version": "v0.0.0-20260609183447-7b96c35f5f4b",
+  "commit": "7b96c35f5f4babfc9d68a60baf5e85f2303d4a4b",
+  "files": [
+    {
+      "path": "LICENSE",
+      "sha256": "8b532d93b35ab59ae9b9ccc08aae66f003c1449b1f7a2d12f5900b008dda1415",
+      "size": 1293
+    },
+    {
+      "path": "all.go",
+      "sha256": "caf55aa970b9812089bd9a1d51591933d97f590e7b965ac9e80ab7486b4c8a36",
+      "size": 4311
+    },
+    {
+      "path": "client.go",
+      "sha256": "ac60978ce174c22e528b7920c6e012854ef8747945b5c3a83a4d799d90c20d9e",
+      "size": 63741
+    },
+    {
+      "path": "client_fs.go",
+      "sha256": "4deb0d93c58a734753bb6c3563d36e1a98af69a1472b74390f375160e59d0c14",
+      "size": 2001
+    },
+    {
+      "path": "conn.go",
+      "sha256": "5e6e69ed3e572c53f4e1c628f8e98dafa7907c4635c65fa4dc6ad98280ecf4ee",
+      "size": 25367
+    },
+    {
+      "path": "credit.go",
+      "sha256": "a9ba02b1c6bf86ab5ba2b723e64a493a4ff9be76843912c84c8dc8eb66d60597",
+      "size": 1148
+    },
+    {
+      "path": "deprecated.go",
+      "sha256": "c697999a23f97fc4bb7d8f76ef32134f20816c61c073f7927c47c0ee4734ed4e",
+      "size": 292
+    },
+    {
+      "path": "errors.go",
+      "sha256": "0c3de9060b457e54781e2ce062c8accce4d8ec7210fc4620a4bfc66e5e4ea6f5",
+      "size": 1713
+    },
+    {
+      "path": "feature.go",
+      "sha256": "57e8ae793e94fb65cc10f3cdc1d9eb9f26687b85b4738d2eb26591d19492ff23",
+      "size": 1002
+    },
+    {
+      "path": "filepath.go",
+      "sha256": "6d9b9e47a6cc6022e8ea3673ff5a15c6feb64fa433974ef1a1a52f3cc3acce29",
+      "size": 9011
+    },
+    {
+      "path": "go.mod",
+      "sha256": "c6b7040072de9c9d6bb8924b52a2dd205f45e62e2c1920ea3ce50e3a328c633c",
+      "size": 748
+    },
+    {
+      "path": "go.sum",
+      "sha256": "9f61f827392fa7f4e740a5487c111706b2548cd40fd68527ca784cacf3f40839",
+      "size": 7125
+    },
+    {
+      "path": "initiator.go",
+      "sha256": "e0e3d9d86217ae6c6b5e7d7dbc578056447c323b4e2d41342b8884dce7812ec3",
+      "size": 1750
+    },
+    {
+      "path": "internal/crypto/ccm/cbc_mac.go",
+      "sha256": "cbdcb9e4d45e3226b6947df671b052c125a697210aac3dd494fbf96972f0ae53",
+      "size": 773
+    },
+    {
+      "path": "internal/crypto/ccm/ccm.go",
+      "sha256": "74b95a6d357fb70db333c8f6f807e827801fae5bb8033ec46a137be4d2fd3814",
+      "size": 4710
+    },
+    {
+      "path": "internal/crypto/ccm/util.go",
+      "sha256": "ff68fd099685002279488242771aed014ae4bdb76cf9d017e3630c9b66b27fdf",
+      "size": 2047
+    },
+    {
+      "path": "internal/crypto/cmac/cmac.go",
+      "sha256": "d645c1ac68c24712c9688331d4b18f9831f9a0a637319ecb0c93f897233f7200",
+      "size": 3842
+    },
+    {
+      "path": "internal/erref/erref.go",
+      "sha256": "7661d338c5fefed6406f61a0a4a55a71effff7f49521ac8f78a90e576752028c",
+      "size": 96
+    },
+    {
+      "path": "internal/erref/ntstatus.go",
+      "sha256": "71941bad2e55304b23e3dfdc1de8d1a2e7bbd4e23bcbbe4426fac6c80019cbb3",
+      "size": 434302
+    },
+    {
+      "path": "internal/msrpc/msrpc.go",
+      "sha256": "d8276b38cd69cf93d071abebdb25164993bfbf023b3eba346a804e7df351f1a1",
+      "size": 8502
+    },
+    {
+      "path": "internal/ntlm/challengemessage.go",
+      "sha256": "4ad881980f4e3fb1671eb47d43bf9d792652ad73cf119ce39fc7cb8d809c7c2b",
+      "size": 2537
+    },
+    {
+      "path": "internal/ntlm/client.go",
+      "sha256": "9107b7d8af7cab074df1e4a30efa0587fbcd1623c9b705f2de8c44ceb4adc8c4",
+      "size": 6738
+    },
+    {
+      "path": "internal/ntlm/common.go",
+      "sha256": "ff1cf866ab7aede50e3511258752612be45dc6179dce73bcbd820423f70645e4",
+      "size": 794
+    },
+    {
+      "path": "internal/ntlm/ntlm.go",
+      "sha256": "b928e4a02c92ecad5d56d3e5fd82ecf488491b56c4607b620229f9ca8b27ba89",
+      "size": 8259
+    },
+    {
+      "path": "internal/ntlm/server.go",
+      "sha256": "0631c3b0b90c5b7eafebb0753c6d209b1b529d4647f38fbbf5bffc08a8bdd830",
+      "size": 8050
+    },
+    {
+      "path": "internal/ntlm/session.go",
+      "sha256": "8da892a0c1e608d22b48df6c382f6529d797a5eff6ee025e49a5c33132205209",
+      "size": 4427
+    },
+    {
+      "path": "internal/smb2/const.go",
+      "sha256": "e53bdd3844b54bf8973343d87b4947663bec929870039e7c8af876c6b476ba72",
+      "size": 15354
+    },
+    {
+      "path": "internal/smb2/dtyp.go",
+      "sha256": "7e94478c669f4ea562523d1238f570462be579cd47fa538082b3e22c3ed8ac71",
+      "size": 2935
+    },
+    {
+      "path": "internal/smb2/fscc.go",
+      "sha256": "ee47cf511ac7ae5223de0720d6af1ee003b835428be8b94f4cdeacaf124e9070",
+      "size": 19423
+    },
+    {
+      "path": "internal/smb2/iface.go",
+      "sha256": "c91999fe606d8535a6d1c265941f1a10ad7941f001fde0047e343f188a65a1af",
+      "size": 246
+    },
+    {
+      "path": "internal/smb2/packet.go",
+      "sha256": "996335605bffac03b9a4338c70ccc71b2fc01f6e3c5176639c7479e291815fd3",
+      "size": 5872
+    },
+    {
+      "path": "internal/smb2/request.go",
+      "sha256": "8ec7475ae12f7762715ddb391e79553115042e4b56fc8026f05e9d38b31dbbe8",
+      "size": 28825
+    },
+    {
+      "path": "internal/smb2/response.go",
+      "sha256": "6396046df4c954c1d6304e27ea23fb914f8b47b678a0846cf95a00257b74c663",
+      "size": 32275
+    },
+    {
+      "path": "internal/smb2/smb2.go",
+      "sha256": "eabb83924979c8b00da5ec027fe3a965f3e47241bb14bc4bb2983c7e4de9d964",
+      "size": 4980
+    },
+    {
+      "path": "internal/smb2/util.go",
+      "sha256": "8eed2df71016896652e4fa5850be39f4753a1297fa183ed7d9f4b593365ebbc5",
+      "size": 325
+    },
+    {
+      "path": "internal/spnego/spnego.go",
+      "sha256": "73b2bc8842688ea352743f1fd8396e7655a8b37f37bf4f99261daf6bc297a5c0",
+      "size": 7933
+    },
+    {
+      "path": "internal/utf16le/utf16le.go",
+      "sha256": "0b5a2db82c3d79543c5fa11f62c41893cd618ebd0b1e5c9580c585a18b092afe",
+      "size": 4972
+    },
+    {
+      "path": "kdf.go",
+      "sha256": "38839fa5e0b677a09e15cfec16938be98114e7db2ce0a666c693610f3f67e5ea",
+      "size": 383
+    },
+    {
+      "path": "krb5.go",
+      "sha256": "a94416914bee09f359b5698756fd024d112151b02413478239943a216c7e382b",
+      "size": 3308
+    },
+    {
+      "path": "path.go",
+      "sha256": "3ca42270de0a5dfff02d3c3b288dbdd5a352def1e8891af61a912731a1886118",
+      "size": 2241
+    },
+    {
+      "path": "session.go",
+      "sha256": "0da5480b459b0a5b3a816e8ba01dfa4de273f5cfd6085c65671d3821ac3ea384",
+      "size": 10415
+    },
+    {
+      "path": "smb2.go",
+      "sha256": "fbf309f2845d018907b01296d4e75dbb16ddbe38e0e29c06422f431c8750a4c8",
+      "size": 793
+    },
+    {
+      "path": "spnego.go",
+      "sha256": "65db43d18f252140b5511dc5985f0731921b1c53c5b1c0576426dbfd015f858a",
+      "size": 1767
+    },
+    {
+      "path": "transport.go",
+      "sha256": "02f169cd33ffe2a44a0beb47bcdf443dcc7ec711d31389648cc4a8a03b819d9c",
+      "size": 1242
+    },
+    {
+      "path": "tree_conn.go",
+      "sha256": "a04baa02a958d7d74d73c6b177d1bfd62bb2937ed58ae661a9c7f5ff235610f1",
+      "size": 7338
+    }
+  ]
+}

@@ -1,3 +1,78 @@
+export namespace bootstrap {
+
+	export class Volume {
+	    UUID: string;
+	    Label: string;
+	    Free: number;
+	    Share: string;
+	    MediaID: string;
+
+	    static createFrom(source: any = {}) {
+	        return new Volume(source);
+	    }
+
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.UUID = source["UUID"];
+	        this.Label = source["Label"];
+	        this.Free = source["Free"];
+	        this.Share = source["Share"];
+	        this.MediaID = source["MediaID"];
+	    }
+	}
+	export class Plan {
+	    ID: string;
+	    Model: string;
+	    Hardware: string;
+	    Arch: string;
+	    Volume: Volume;
+	    Archive: string;
+	    URL: string;
+	    SHA256: string;
+	    Size: number;
+	    Commands: string[];
+	    IntegritySource: string;
+
+	    static createFrom(source: any = {}) {
+	        return new Plan(source);
+	    }
+
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.ID = source["ID"];
+	        this.Model = source["Model"];
+	        this.Hardware = source["Hardware"];
+	        this.Arch = source["Arch"];
+	        this.Volume = this.convertValues(source["Volume"], Volume);
+	        this.Archive = source["Archive"];
+	        this.URL = source["URL"];
+	        this.SHA256 = source["SHA256"];
+	        this.Size = source["Size"];
+	        this.Commands = source["Commands"];
+	        this.IntegritySource = source["IntegritySource"];
+	    }
+
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
+
+}
+
 export namespace config {
 
 	export class Conflict {
@@ -86,24 +161,6 @@ export namespace main {
 	        this.Version = source["Version"];
 	    }
 	}
-	export class ConnectionRequest {
-	    Host: string;
-	    Port: number;
-	    User: string;
-	    Password: string;
-
-	    static createFrom(source: any = {}) {
-	        return new ConnectionRequest(source);
-	    }
-
-	    constructor(source: any = {}) {
-	        if ('string' === typeof source) source = JSON.parse(source);
-	        this.Host = source["Host"];
-	        this.Port = source["Port"];
-	        this.User = source["User"];
-	        this.Password = source["Password"];
-	    }
-	}
 	export class HostKeyView {
 	    Kind: string;
 	    Address: string;
@@ -124,6 +181,63 @@ export namespace main {
 	        this.Algorithm = source["Algorithm"];
 	    }
 	}
+	export class BootstrapDiscovery {
+	    Model: string;
+	    Hardware: string;
+	    Arch: string;
+	    Volumes: bootstrap.Volume[];
+	    HostKey?: HostKeyView;
+
+	    static createFrom(source: any = {}) {
+	        return new BootstrapDiscovery(source);
+	    }
+
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.Model = source["Model"];
+	        this.Hardware = source["Hardware"];
+	        this.Arch = source["Arch"];
+	        this.Volumes = this.convertValues(source["Volumes"], bootstrap.Volume);
+	        this.HostKey = this.convertValues(source["HostKey"], HostKeyView);
+	    }
+
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
+	export class ConnectionRequest {
+	    Host: string;
+	    Port: number;
+	    User: string;
+	    Password: string;
+
+	    static createFrom(source: any = {}) {
+	        return new ConnectionRequest(source);
+	    }
+
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.Host = source["Host"];
+	        this.Port = source["Port"];
+	        this.User = source["User"];
+	        this.Password = source["Password"];
+	    }
+	}
+
 	export class InspectionView {
 	    ID: string;
 	    Arch: string;
@@ -175,6 +289,8 @@ export namespace main {
 	    ImportCore: string;
 	    ImportText: string;
 	    ProviderURL: string;
+	    MihomoProviderURLs: string[];
+	    XrayProviderURLs: string[];
 
 	    static createFrom(source: any = {}) {
 	        return new PlanRequest(source);
@@ -190,6 +306,8 @@ export namespace main {
 	        this.ImportCore = source["ImportCore"];
 	        this.ImportText = source["ImportText"];
 	        this.ProviderURL = source["ProviderURL"];
+	        this.MihomoProviderURLs = source["MihomoProviderURLs"];
+	        this.XrayProviderURLs = source["XrayProviderURLs"];
 	    }
 	}
 	export class PlanView {
@@ -310,6 +428,7 @@ export namespace tls {
 	export class TrustResult {
 	    Status: string;
 	    Detail: string;
+	    Code: string;
 
 	    static createFrom(source: any = {}) {
 	        return new TrustResult(source);
@@ -319,6 +438,7 @@ export namespace tls {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.Status = source["Status"];
 	        this.Detail = source["Detail"];
+	        this.Code = source["Code"];
 	    }
 	}
 

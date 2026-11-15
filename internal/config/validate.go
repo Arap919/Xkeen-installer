@@ -40,7 +40,7 @@ func providerURL(raw string) error {
 		return errors.New("provider URL too long")
 	}
 	u, e := url.Parse(raw)
-	if e != nil || u.Hostname() == "" || (u.Scheme != "https" && u.Scheme != "http") || u.User != nil || u.Fragment != "" {
+	if e != nil || u.Hostname() == "" || (u.Scheme != "https" && u.Scheme != "http") || u.User != nil {
 		return errors.New("invalid HTTP provider URL")
 	}
 	return nil
@@ -93,7 +93,14 @@ func watchdogContract(m map[string]any) (string, string, string, bool) {
 	if controller != "127.0.0.1:9090" || secret == "" {
 		return "", "", "", false
 	}
-	target := group(m, "PROXY")
+	targetName := "PROXY"
+	if group(m, "Proxy") != nil {
+		if group(m, "PROXY") != nil {
+			return "", "", "", false
+		}
+		targetName = "Proxy"
+	}
+	target := group(m, targetName)
 	bench := group(m, "BENCHMARK")
 	if target["type"] != "select" || bench["type"] != "select" {
 		return "", "", "", false
@@ -143,5 +150,5 @@ func watchdogContract(m map[string]any) (string, string, string, bool) {
 			found = true
 		}
 	}
-	return "http://" + controller, secret, "PROXY", found
+	return "http://" + controller, secret, targetName, found
 }

@@ -10,6 +10,15 @@ import (
 	"path/filepath"
 )
 
+// StorageError exposes only a fixed operation name, never paths or key bytes.
+type StorageError struct {
+	Operation string
+	cause     error
+}
+
+func (e *StorageError) Error() string { return "TLS storage operation failed: " + e.Operation }
+func (e *StorageError) Unwrap() error { return e.cause }
+
 var errStorage = errors.New("private TLS storage unavailable or unsafe")
 
 // Only the final, application-owned directory is created. Existing parent paths
@@ -31,7 +40,7 @@ func openStore(dir string, create bool) (*os.Root, error) {
 		return nil, errStorage
 	}
 	if e = privatePath(dir, true, created); e != nil {
-		return nil, errStorage
+		return nil, e
 	}
 	r, e := os.OpenRoot(dir)
 	if e != nil {
@@ -63,7 +72,16 @@ func readPrivate(r *os.Root, name string) ([]byte, error) {
 // Deployment evidence is granted only after the platform persistence contract
 // succeeds; incomplete writes and sync failures never grant that evidence.
 func (p TLSProposal) Save(dir string) error { return p.save(dir, syncStore) }
-func (p TLSProposal) save(dir string, sync func(*os.Root, string) error) error {
+func (p TLSProposal) save(dir string, sync func(*os.Root, string) error) (failure error) {
+	operation := "MATERIAL"
+	defer func() {
+		if failure != nil {
+			var nested *StorageError
+			if !errors.As(failure, &nested) {
+				failure = &StorageError{Operation: operation, cause: failure}
+			}
+		}
+	}()
 	if p.private == nil {
 		return errStorage
 	}
@@ -77,10 +95,12 @@ func (p TLSProposal) save(dir string, sync func(*os.Root, string) error) error {
 	if len(p.private.caKey) > 0 {
 		names = append(names, "ca.key")
 	}
+	operation = "LOCATION"
 	location, e := saveLocation(dir, names)
 	if e != nil {
-		return errStorage
+		return e
 	}
+	operation = "OPEN_STORE"
 	r, e := openStore(location, true)
 	if e != nil {
 		return e
@@ -90,6 +110,7 @@ func (p TLSProposal) save(dir string, sync func(*os.Root, string) error) error {
 		name string
 		data []byte
 	}{{"ca.crt", p.private.ca}, {"ca.key", p.private.caKey}, {"server.crt", p.private.cert}, {"server.key", p.private.key}}
+	operation = "CHECK_EXISTING"
 	for _, f := range files {
 		if len(f.data) == 0 {
 			continue
@@ -110,21 +131,28 @@ func (p TLSProposal) save(dir string, sync func(*os.Root, string) error) error {
 		if _, e = r.Lstat(f.name); e == nil {
 			continue
 		}
+		operation = "CREATE_FILE"
 		out, e := r.OpenFile(f.name, os.O_WRONLY|os.O_CREATE|os.O_EXCL|durableWriteFlags, 0600)
 		if e != nil {
 			return errStorage
 		}
 		if e = privatePath(filepath.Join(location, f.name), false, true); e == nil {
+			operation = "WRITE_FILE"
 			_, e = out.Write(f.data)
 		}
 		if e == nil {
+			operation = "SYNC_FILE"
 			e = out.Sync()
 		}
 		ce := out.Close()
-		if e != nil || ce != nil {
+		if e != nil {
+			return e
+		}
+		if ce != nil {
 			return errStorage
 		}
 	}
+	operation = "SYNC_STORE"
 	if e = sync(r, location); e != nil {
 		return errStorage
 	}
@@ -132,6 +160,7 @@ func (p TLSProposal) save(dir string, sync func(*os.Root, string) error) error {
 		if len(f.data) == 0 {
 			continue
 		}
+		operation = "READBACK"
 		actual, e := readPrivate(r, f.name)
 		if e != nil || !bytes.Equal(actual, f.data) {
 			return errStorage
@@ -141,6 +170,7 @@ func (p TLSProposal) save(dir string, sync func(*os.Root, string) error) error {
 		return errStorage
 	}
 	if location != dir {
+		operation = "PUBLISH_STORE"
 		if e = publishStore(location, dir); e != nil {
 			return errStorage
 		}
@@ -244,7 +274,10 @@ func syncStoreFiles(r *os.Root) error {
 		}
 		e = f.Sync()
 		ce := f.Close()
-		if e != nil || ce != nil {
+		if e != nil {
+			return e
+		}
+		if ce != nil {
 			return errStorage
 		}
 	}

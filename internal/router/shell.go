@@ -103,7 +103,14 @@ func (t *SSHTransport) shellStat(ctx context.Context, p string) (Entry, error) {
 		return Entry{}, err
 	}
 	q := shellQuote(p)
-	b, err := t.shellCommand(ctx, guard+"if [ ! -e "+q+" ] && [ ! -L "+q+" ]; then exit 44; fi; if [ -L "+q+" ]; then printf 'l '; elif [ -d "+q+" ]; then printf 'd '; elif [ -f "+q+" ]; then printf 'f '; else printf 's '; fi; stat -c '%a %s' -- "+q, nil)
+	// BusyBox without FEATURE_STAT_FORMAT still exposes size and raw mode via -t.
+	// See coreutils/stat.c print_stat(): filename, size, blocks, hexadecimal mode.
+	// Remove the exact filename before splitting: valid paths may contain spaces.
+	command := guard + "file=" + q + "; if [ ! -e \"$file\" ] && [ ! -L \"$file\" ]; then exit 44; fi; " +
+		"if [ -L \"$file\" ]; then kind=l; elif [ -d \"$file\" ]; then kind=d; elif [ -f \"$file\" ]; then kind=f; else kind=s; fi; " +
+		"record=$(stat -t \"$file\") || exit 46; case \"$record\" in \"$file \"*) record=${record#\"$file \"};; *) exit 46;; esac; " +
+		"set -f; set -- $record; [ $# -ge 3 ] || exit 46; printf '%s %s %s\\n' \"$kind\" \"$3\" \"$1\""
+	b, err := t.shellCommand(ctx, command, nil)
 	if err != nil {
 		return Entry{}, err
 	}
@@ -111,9 +118,14 @@ func (t *SSHTransport) shellStat(ctx context.Context, p string) (Entry, error) {
 	if len(fields) != 3 {
 		return Entry{}, errors.New("unsupported remote stat output")
 	}
-	mode, err := strconv.ParseUint(fields[1], 8, 32)
+	mode, err := strconv.ParseUint(fields[1], 16, 16)
 	if err != nil {
 		return Entry{}, errors.New("invalid remote mode")
+	}
+	for _, digit := range fields[2] {
+		if digit < '0' || digit > '9' {
+			return Entry{}, errors.New("invalid remote size")
+		}
 	}
 	size, err := strconv.ParseInt(fields[2], 10, 64)
 	if err != nil || size < 0 {
@@ -131,12 +143,28 @@ func (t *SSHTransport) shellStat(ctx context.Context, p string) (Entry, error) {
 	}
 	switch fields[0] {
 	case "d":
+		if mode&0170000 != 0040000 {
+			return Entry{}, errors.New("remote file type mismatch")
+		}
 		m |= fs.ModeDir
 	case "l":
+		if mode&0170000 != 0120000 {
+			return Entry{}, errors.New("remote file type mismatch")
+		}
 		m |= fs.ModeSymlink
 	case "f":
-	default:
+		if mode&0170000 != 0100000 {
+			return Entry{}, errors.New("remote file type mismatch")
+		}
+	case "s":
+		switch mode & 0170000 {
+		case 0010000, 0020000, 0060000, 0140000:
+		default:
+			return Entry{}, errors.New("invalid remote file type")
+		}
 		m |= fs.ModeIrregular
+	default:
+		return Entry{}, errors.New("invalid remote file type")
 	}
 	return Entry{p, m, size}, nil
 }
@@ -250,7 +278,7 @@ func (t *SSHTransport) shellWriteAtomic(ctx context.Context, p string, b []byte,
 	q := shellQuote(p)
 	qt := shellQuote(temp)
 	cleanup := shellQuote("rm -f -- " + qt)
-	complete := "size=$(stat -c '%s' -- " + qt + ") || exit 46; [ \"$size\" = " + shellQuote(strconv.Itoa(len(b))) + " ] || exit 46; "
+	complete := "size=$(wc -c < " + qt + ") || exit 46; set -f; set -- $size; [ $# -eq 1 ] && [ \"$1\" = " + shellQuote(strconv.Itoa(len(b))) + " ] || exit 46; "
 	command := guard + "[ ! -d " + q + " ] || exit 46; umask 077; trap " + cleanup + " 0; (set -C; cat > " + qt + ") || exit 46; " + complete + "chmod " + fmt.Sprintf("%o", m.Perm()) + " " + qt + " || exit 46; " + guard + "[ ! -d " + q + " ] || exit 46; mv -f -- " + qt + " " + q
 	_, err = t.shellCommand(ctx, command, b)
 	return err

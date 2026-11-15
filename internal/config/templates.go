@@ -7,9 +7,9 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
-	"strconv"
 
 	"github.com/Arap919/xkeen-installer/internal/catalog"
+	"gopkg.in/yaml.v3"
 )
 
 //go:embed templates/*
@@ -31,11 +31,14 @@ type Selection struct {
 
 // Import holds backend-only input. Constructors copy local data; no input is serialized.
 type Import struct {
-	core        catalog.Component
-	localSet    bool
-	data        []byte
-	providerURL string
-	providerSet bool
+	core         catalog.Component
+	localSet     bool
+	data         []byte
+	providerURL  string
+	providerURLs []string
+	xrayURLs     []string
+	xrayData     []byte
+	providerSet  bool
 }
 
 func LocalImport(core catalog.Component, data []byte) Import {
@@ -79,13 +82,61 @@ func (p *ConfigProposal) conflict(path, reason, addition string) {
 	p.Conflicts = append(p.Conflicts, Conflict{path, reason, addition})
 	p.ActivationReady = false
 }
-func newMihomo(url string) ([]byte, error) {
+func newMihomo(url string) ([]byte, error) { return newMihomoURLs([]string{url}) }
+func newMihomoURLs(urls []string) ([]byte, error) {
 	key := make([]byte, 32)
 	if _, e := rand.Read(key); e != nil {
 		return nil, fmt.Errorf("generate API secret")
 	}
-	b, _ := templates.ReadFile("templates/mihomo.yaml")
-	return []byte(fmt.Sprintf(string(b), strconv.Quote(hex.EncodeToString(key)), strconv.Quote(url))), nil
+	b, err := templates.ReadFile("templates/mihomo.yaml")
+	if err != nil {
+		return nil, err
+	}
+	m, err := mihomoDocument(b)
+	if err != nil {
+		return nil, err
+	}
+	baseProviders, ok := m["proxy-providers"].(map[string]any)
+	if !ok {
+		return nil, fmt.Errorf("missing embedded proxy providers")
+	}
+	prototype, ok := baseProviders["VPNProvider"].(map[string]any)
+	if !ok {
+		return nil, fmt.Errorf("missing embedded VPNProvider")
+	}
+	providers := map[string]any{}
+	names := []any{}
+	for i, raw := range urls {
+		name := "VPNProvider"
+		if i > 0 {
+			name = fmt.Sprintf("VPNProvider%d", i)
+		}
+		names = append(names, name)
+		cachePath := fmt.Sprintf("./providers/subscription-%d.yaml", i)
+		if i == 0 {
+			cachePath = "./providers/subscription.yaml"
+		}
+		provider := make(map[string]any, len(prototype)+1)
+		for key, value := range prototype {
+			provider[key] = value
+		}
+		provider["url"] = raw
+		provider["path"] = cachePath
+		providers[name] = provider
+	}
+	m["proxy-providers"] = providers
+	group(m, "Proxy")["use"] = names
+	group(m, "BENCHMARK")["use"] = names
+	m["external-controller"] = "127.0.0.1:9090"
+	m["secret"] = hex.EncodeToString(key)
+	listeners := m["listeners"].([]any)
+	for _, value := range listeners {
+		listener := value.(map[string]any)
+		if listener["name"] == "benchmark-in" {
+			listener["listen"] = "127.0.0.1"
+		}
+	}
+	return yaml.Marshal(m)
 }
 func newWatchdog(controller, secret, target string) []byte {
 	b, _ := templates.ReadFile("templates/watchdog.json")

@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"github.com/Arap919/xkeen-installer/internal/bootstrap"
 	"github.com/Arap919/xkeen-installer/internal/config"
 	"github.com/Arap919/xkeen-installer/internal/install"
 	"github.com/Arap919/xkeen-installer/internal/router"
@@ -39,14 +40,16 @@ type InspectionView struct {
 	HostKey    *HostKeyView
 }
 type PlanRequest struct {
-	InspectionID string
-	Cores        []string
-	ActiveCore   string
-	UI           bool
-	Watchdog     bool
-	ImportCore   string
-	ImportText   string
-	ProviderURL  string
+	InspectionID       string
+	Cores              []string
+	ActiveCore         string
+	UI                 bool
+	Watchdog           bool
+	ImportCore         string
+	ImportText         string
+	ProviderURL        string
+	MihomoProviderURLs []string
+	XrayProviderURLs   []string
 }
 
 func (PlanRequest) String() string     { return "PlanRequest{redacted}" }
@@ -92,9 +95,14 @@ type TrustView struct {
 
 // App is the only bound object. Backend plans, TLS keys and config bytes stay private.
 type App struct {
-	mu           sync.Mutex
-	ctx          context.Context
-	transport    router.Transport
+	bootstrap      *bootstrap.Session
+	bootstrapAwait bool
+	firmware       *router.SSHTransport
+	closeStore     func() error
+	mu             sync.Mutex
+	ctx            context.Context
+	transport      router.Transport
+
 	snapshot     router.Snapshot
 	snapshotID   string
 	inspectedAt  time.Time
@@ -111,9 +119,11 @@ type App struct {
 	tlsDir       string
 	trust        localtls.TrustAction
 	result       ResultView
-	run          func(context.Context, install.Plan, router.Transport, func(install.Event)) (install.Report, error)
-	confirm      func(install.Plan, string) (install.Plan, error)
-	emit         func(Progress)
+
+	run     func(context.Context, install.Plan, router.Transport, func(install.Event)) (install.Report, error)
+	confirm func(install.Plan, string) (install.Plan, error)
+
+	emit func(Progress)
 }
 
 func newApp() *App {

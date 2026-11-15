@@ -28,14 +28,15 @@ const (
 	MIPS   RouterArch = "mips"
 )
 
-// Integrity describes an upstream-published digest, never a locally invented one.
+// Integrity records a reviewed digest and its explicit provenance. Entware pins
+// identify installer-reviewed bytes, not an upstream-published checksum.
 type Integrity struct {
 	SHA256 string
 	Source string
 }
 
-// Artifact is a download contract, not evidence of installation. Size zero means unpublished.
-// Entware is explicitly unversioned and has no published digest in this snapshot.
+// Artifact is a download contract, not evidence of installation. Size zero means unknown.
+// Entware remains unversioned; its exact bytes are pinned by installer review.
 type Artifact struct {
 	Component Component
 	Arch      RouterArch
@@ -58,11 +59,18 @@ func Resolve(c Component, arch RouterArch) (Artifact, error) {
 		switch arch {
 		case ARM64:
 			a.URL = "https://bin.entware.net/aarch64-k3.10/installer/aarch64-installer.tar.gz"
+			a.Size = 3232671
+			a.Integrity.SHA256 = "64451a3a70ca85aaab3b0677814f6b58f7994793ed6b120eddc36a16639c15d1"
 		case MIPSel:
 			a.URL = "https://bin.entware.net/mipselsf-k3.4/installer/mipsel-installer.tar.gz"
+			a.Size = 3304180
+			a.Integrity.SHA256 = "44d94db8b4eb0ccd950552bc71c17ae50777dcac89f8aae949d7140c55e76c9f"
 		case MIPS:
 			a.URL = "https://bin.entware.net/mipssf-k3.4/installer/mips-installer.tar.gz"
+			a.Size = 3503782
+			a.Integrity.SHA256 = "a8ca977def91f1a12ab4675e20e89a4c05700cb932ef9e41b88e5cb8388f8fe2"
 		}
+		a.Integrity.Source = "installer-reviewed:2026-11-07:" + a.URL
 		return a, nil
 	}
 	if c == Watchdog {
@@ -165,7 +173,7 @@ func Resolve(c Component, arch RouterArch) (Artifact, error) {
 }
 
 // ResolveVersion accepts only a concrete version present in the reviewed snapshot.
-// Adding another version requires reviewing its assets, sizes and published digests.
+// Adding another version requires reviewing its assets, sizes and digest provenance.
 func ResolveVersion(c Component, arch RouterArch, version string) (Artifact, error) {
 	a, err := Resolve(c, arch)
 	if err != nil {
@@ -178,7 +186,7 @@ func ResolveVersion(c Component, arch RouterArch, version string) (Artifact, err
 }
 
 // Verify rejects altered metadata before reading and checks compressed/downloaded bytes.
-// A nil error proves size and upstream SHA256, not authenticity independent of upstream,
+// A nil error proves the reviewed size and SHA256, not publisher authentication,
 // archive safety, executable architecture, successful installation or service readiness.
 func Verify(a Artifact, r io.Reader) error {
 	canonical, err := ResolveVersion(a.Component, a.Arch, a.Version)

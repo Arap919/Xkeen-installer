@@ -124,6 +124,9 @@ func mihomoRuleProvider(m map[string]any, name string) bool {
 		return false
 	}
 	switch provider["type"] {
+	case "inline":
+		payload, ok := stringList(provider["payload"])
+		return ok && len(payload) > 0
 	case "http":
 		u, ok := provider["url"].(string)
 		if !ok || providerURL(u) != nil {

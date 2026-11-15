@@ -93,6 +93,21 @@ func run(ctx context.Context, p Plan, t router.Transport, emit func(Event), load
 	if err != nil {
 		return fail()
 	}
+	if d.subscriptions {
+		for _, name := range []string{"geoip.dat", "geosite.dat"} {
+			p := "/opt/etc/xray/dat/" + name
+			_, existing := d.snapshot.Config(p)
+			found := existing
+			for _, f := range files {
+				if f.path == p {
+					found = true
+				}
+			}
+			if !found {
+				return fail()
+			}
+		}
+	}
 	done()
 	begin("reinspect")
 	fresh, err := router.Inspect(ctx, t)
@@ -112,11 +127,8 @@ func run(ctx context.Context, p Plan, t router.Transport, emit func(Event), load
 			return fail()
 		}
 	}
-	if d.selection.Config.Watchdog {
-		v, e := command(ctx, t, "pidof crond")
-		if e != nil || len(bytes.TrimSpace(v)) == 0 {
-			return fail()
-		}
+	if _, e := command(ctx, t, cronPreflightCommand); e != nil {
+		return fail()
 	}
 	// Upstream init resolves a bare core through /opt/bin before /opt/sbin.
 	// Never validate one executable and subsequently launch a shadowing one.
@@ -192,6 +204,14 @@ func run(ctx context.Context, p Plan, t router.Transport, emit func(Event), load
 		if f.path == "/opt/sbin/.xkeen/02_install/07_install_register/04_register_init.sh" {
 			newInit = append([]byte(nil), f.data...)
 		}
+		if strings.HasPrefix(f.path, "/opt/etc/xray/dat/") {
+			if _, exists := fresh.Config(f.path); exists {
+				continue
+			}
+			if _, e := t.Stat(ctx, f.path); !errors.Is(e, fs.ErrNotExist) {
+				return fail()
+			}
+		}
 		if err = write(f); err != nil {
 			return fail()
 		}
@@ -218,6 +238,9 @@ func run(ctx context.Context, p Plan, t router.Transport, emit func(Event), load
 	begin("configure")
 	mutating = true
 	for _, f := range d.configs {
+		if f.path == config.XraySchedulePath {
+			continue
+		}
 		if f.preserve {
 			actual, e := t.Read(ctx, f.path)
 			if e != nil || !bytes.Equal(actual, f.data) {
@@ -254,7 +277,7 @@ func run(ctx context.Context, p Plan, t router.Transport, emit func(Event), load
 	// nor stderr from a core validator is included in events, errors or reports.
 	stage := "/opt/.xkeen-installer-stage/" + p.ID
 	for _, f := range d.configs {
-		if f.path == config.WatchdogPath {
+		if f.path == config.WatchdogPath || f.path == config.XraySourcesPath || f.path == config.XrayUpdaterPath || f.path == config.XraySchedulePath {
 			continue
 		}
 		copy := f
@@ -269,7 +292,7 @@ func run(ctx context.Context, p Plan, t router.Transport, emit func(Event), load
 	if d.active == catalog.Mihomo {
 		validation = "/opt/sbin/mihomo -t -d " + quote(stage+"/opt/etc/mihomo") + " -f " + quote(stage+config.MihomoPath)
 	} else {
-		validation = "/opt/sbin/xray run -test -confdir " + quote(stage+"/opt/etc/xray/configs")
+		validation = "XRAY_LOCATION_ASSET=/opt/etc/xray/dat /opt/sbin/xray run -test -confdir " + quote(stage+"/opt/etc/xray/configs")
 	}
 	if _, err = command(ctx, t, validation); err != nil {
 		return fail()
@@ -278,17 +301,25 @@ func run(ctx context.Context, p Plan, t router.Transport, emit func(Event), load
 	if d.active == catalog.Mihomo {
 		validation = "/opt/sbin/mihomo -t -d /opt/etc/mihomo -f /opt/etc/mihomo/config.yaml"
 	} else {
-		validation = "/opt/sbin/xray run -test -confdir /opt/etc/xray/configs"
+		validation = "XRAY_LOCATION_ASSET=/opt/etc/xray/dat /opt/sbin/xray run -test -confdir /opt/etc/xray/configs"
 	}
 	if _, err = command(ctx, t, validation); err != nil {
 		return fail()
+	}
+	if d.subscriptions && d.active != catalog.Xray {
+		if _, err = command(ctx, t, "XRAY_LOCATION_ASSET=/opt/etc/xray/dat /opt/sbin/xray run -test -confdir "+quote(stage+"/opt/etc/xray/configs")); err != nil {
+			return fail()
+		}
+		if _, err = command(ctx, t, "XRAY_LOCATION_ASSET=/opt/etc/xray/dat /opt/sbin/xray run -test -confdir /opt/etc/xray/configs"); err != nil {
+			return fail()
+		}
 	}
 	done()
 	begin("activate")
 	mutating = true
 	// Calling the standalone init avoids xkeen's implicit self-healing opkg writes
 	// and its detach behavior. 'on' requests a synchronous, explicit user start.
-	if _, err = command(ctx, t, serviceLaunch("/opt/etc/init.d/S05xkeen start on")); err != nil {
+	if _, err = command(ctx, t, serviceLaunch("XRAY_LOCATION_ASSET=/opt/etc/xray/dat /opt/etc/init.d/S05xkeen start on")); err != nil {
 		return fail()
 	}
 	if _, err = command(ctx, t, "/opt/etc/init.d/S05xkeen status"); err != nil {
@@ -299,6 +330,40 @@ func run(ctx context.Context, p Plan, t router.Transport, emit func(Event), load
 		return fail()
 	}
 	done()
+	begin("cron")
+	mutating = true
+	if _, err = command(ctx, t, cronPreflightCommand); err != nil {
+		return fail()
+	}
+	if _, err = command(ctx, t, serviceLaunch("/opt/etc/init.d/S10cron start")); err != nil {
+		return fail()
+	}
+	if _, err = command(ctx, t, cronVerifyCommand); err != nil {
+		return fail()
+	}
+	done()
+	if d.subscriptions {
+		begin("subscriptions")
+		mutating = true
+		for _, f := range d.configs {
+			if f.path == config.XraySchedulePath {
+				if f.preserve {
+					old, e := t.Read(ctx, f.path)
+					if e != nil || !bytes.Equal(old, f.data) {
+						return fail()
+					}
+				} else {
+					if _, e := t.Stat(ctx, f.path); !errors.Is(e, fs.ErrNotExist) {
+						return fail()
+					}
+					if err = write(f); err != nil {
+						return fail()
+					}
+				}
+			}
+		}
+		done()
+	}
 	if d.selection.Config.Watchdog {
 		begin("watchdog")
 		mutating = true
@@ -322,6 +387,9 @@ func run(ctx context.Context, p Plan, t router.Transport, emit func(Event), load
 			}
 		}
 		if _, err = command(ctx, t, "/opt/bin/router-watchdog --sync-cron"); err != nil {
+			return fail()
+		}
+		if _, err = command(ctx, t, cronVerifyCommand); err != nil {
 			return fail()
 		}
 		check, e := router.Inspect(ctx, t)
@@ -408,6 +476,35 @@ func run(ctx context.Context, p Plan, t router.Transport, emit func(Event), load
 			return fail()
 		}
 	}
+	// Cron dependency hooks must retain all pre-existing user schedules.
+	for _, original := range fresh.Files {
+		if original.Path != "/opt/etc/crontab" && !strings.HasPrefix(original.Path, "/opt/etc/cron.d/") && !strings.HasPrefix(original.Path, "/opt/var/spool/cron/") && !strings.HasPrefix(original.Path, "/opt/etc/cron.1min/") {
+			continue
+		}
+		if d.selection.Config.Watchdog && original.Path == "/opt/etc/cron.1min/router-watchdog" {
+			continue
+		}
+		expected, _ := fresh.Config(original.Path)
+		actual, e := t.Read(ctx, original.Path)
+		if e != nil {
+			begin("preservation")
+			return fail()
+		}
+		if d.selection.Config.Watchdog && original.Path == "/opt/etc/crontab" {
+			for _, line := range strings.Split(string(expected), "\n") {
+				if strings.Contains(line, "/opt/bin/router-watchdog") {
+					continue
+				}
+				if !strings.Contains("\n"+string(actual)+"\n", "\n"+line+"\n") {
+					begin("preservation")
+					return fail()
+				}
+			}
+		} else if !bytes.Equal(expected, actual) {
+			begin("preservation")
+			return fail()
+		}
+	}
 	r.Complete = true
 	r.ReinspectRequired = false
 	return r, nil
@@ -485,3 +582,7 @@ func runtimeVersion(a catalog.Artifact) string {
 // inherit SSH streams and keep Session.Run waiting after init returns. There is
 // no extra '&' or detach wrapper; the foreground init exit status is preserved.
 func serviceLaunch(fixedCommand string) string { return fixedCommand + " </dev/null >/dev/null 2>&1" }
+
+// Entware's cron package uses /opt/sbin/cron, not BusyBox crond.
+const cronPreflightCommand = `for name in cron crond; do for pid in $(pidof "$name" 2>/dev/null); do exe=$(readlink "/proc/$pid/exe") || exit 1; [ "$name" = cron ] && [ "$exe" = /opt/sbin/cron ] || exit 1; done; done`
+const cronVerifyCommand = `test -x /opt/etc/init.d/S10cron && test -x /opt/sbin/cron || exit 1; count=0; for pid in $(pidof cron 2>/dev/null); do [ "$(readlink "/proc/$pid/exe")" = /opt/sbin/cron ] || exit 1; count=$((count+1)); done; [ "$count" -gt 0 ] || exit 1; for pid in $(pidof crond 2>/dev/null); do exit 1; done`

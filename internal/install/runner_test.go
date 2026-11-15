@@ -37,6 +37,9 @@ func (f *fakeRouter) Run(ctx context.Context, c string) (router.Result, error) {
 		return router.Result{}, e
 	}
 	f.commands = append(f.commands, c)
+	if strings.Contains(c, f.fail) && f.fail != "" {
+		return router.Result{}, errors.New("private failure")
+	}
 	switch c {
 	case "netstat -lntp":
 		return router.Result{Stdout: []byte("Active Internet connections (only servers)\nProto Recv-Q Send-Q Local Address Foreign Address State PID/Program name\n" + f.listeners)}, nil
@@ -46,7 +49,7 @@ func (f *fakeRouter) Run(ctx context.Context, c string) (router.Result, error) {
 		return router.Result{Stdout: []byte("/opt/sbin/xkeen-ui")}, nil
 	case "printf 'XKEEN_SHELL_OK\\n'":
 		return router.Result{Stdout: []byte("XKEEN_SHELL_OK\n")}, nil
-	case "pidof crond":
+	case cronPreflightCommand, cronVerifyCommand:
 		return router.Result{Stdout: []byte("123")}, nil
 	case "uname -m":
 		return router.Result{Stdout: []byte("aarch64")}, nil
@@ -65,7 +68,7 @@ func (f *fakeRouter) Run(ctx context.Context, c string) (router.Result, error) {
 	if c == "/opt/etc/init.d/S05xkeen stop" {
 		f.active = ""
 	}
-	if strings.HasPrefix(c, "/opt/etc/init.d/S05xkeen start on") {
+	if strings.Contains(c, "/opt/etc/init.d/S05xkeen start on") {
 		b := string(f.files["/opt/etc/init.d/S05xkeen"])
 		f.active = "xray"
 		if strings.Contains(b, `name_client="mihomo"`) {

@@ -2,10 +2,10 @@ package config
 
 import (
 	"encoding/json"
-	"strings"
 	"testing"
 
 	"github.com/Arap919/xkeen-installer/internal/catalog"
+	"gopkg.in/yaml.v3"
 )
 
 func TestInsufficientCoreStructureBlocksActivation(t *testing.T) {
@@ -60,14 +60,22 @@ func validMihomo(t *testing.T) []byte {
 	return b
 }
 func TestWatchdogRejectsUnverifiableGroupMembership(t *testing.T) {
-	raw := string(validMihomo(t))
-	for name, data := range map[string]string{
-		"filtered benchmark": strings.Replace(raw, "    hidden: true", "    hidden: true\n    filter: ONLY_ONE_NODE", 1),
-		"duplicate target":   strings.Replace(raw, "listeners:", "  - name: PROXY\n    type: select\n    use: [subscription]\nlisteners:", 1),
-		"filtered target":    strings.Replace(raw, "  - name: PROXY\n", "  - name: PROXY\n    exclude-filter: PRIVATE\n", 1),
+	for name, change := range map[string]func(map[string]any){
+		"filtered benchmark": func(m map[string]any) { group(m, "BENCHMARK")["filter"] = "ONLY_ONE_NODE" },
+		"duplicate target":   func(m map[string]any) { m["proxy-groups"] = append(m["proxy-groups"].([]any), group(m, "Proxy")) },
+		"filtered target":    func(m map[string]any) { group(m, "Proxy")["exclude-filter"] = "PRIVATE" },
 	} {
 		t.Run(name, func(t *testing.T) {
-			p, e := Prepare(snapshot(t, "mihomo", map[string][]byte{MihomoPath: []byte(data)}), Selection{Cores: []catalog.Component{catalog.Mihomo}, Watchdog: true}, Import{})
+			m, e := mihomoDocument(validMihomo(t))
+			if e != nil {
+				t.Fatal(e)
+			}
+			change(m)
+			data, e := yaml.Marshal(m)
+			if e != nil {
+				t.Fatal(e)
+			}
+			p, e := Prepare(snapshot(t, "mihomo", map[string][]byte{MihomoPath: data}), Selection{Cores: []catalog.Component{catalog.Mihomo}, Watchdog: true}, Import{})
 			if e != nil || p.WatchdogEnabled || len(p.Conflicts) == 0 {
 				t.Fatalf("unverifiable membership accepted: %v %+v", e, p)
 			}

@@ -7,3 +7,8 @@ frontend/dist/
 frontend/package.json.md5
 build/bin/
 .DS_Store
+release/
+build/deb/
+build/dmg/
+build/windows/installer/tmp/
+.superpowers/

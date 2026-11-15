@@ -7,6 +7,6 @@ const backend=window.go?.main?.App;
 if(!backend){root.textContent='Интерфейс нужно открыть в desktop-приложении XKeen Installer.';}
 else{
  const wizard=new Wizard(backend);const render=mount(root,wizard);
- const off=window.runtime?.EventsOnMultiple('install:progress',async event=>{wizard.progress.push(event);if(event.Step==='finished'){await wizard.finish();}render();},-1);
- window.addEventListener('beforeunload',()=>{wizard.connection.Password='';wizard.selection.ImportText='';wizard.selection.ProviderURL='';off?.();});
+ const off=window.runtime?.EventsOnMultiple('install:progress',async event=>{await wizard.receiveProgress(event);render();if(event.Step==='finished'){const completion=wizard.completeUISetup();render();await completion;render();}},-1);
+ window.addEventListener('beforeunload',()=>{wizard.clearSensitiveInputs();off?.();});
 }

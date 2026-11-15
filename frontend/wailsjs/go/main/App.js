@@ -18,6 +18,10 @@ export function ConfirmPlan(arg1) {
   return window['go']['main']['App']['ConfirmPlan'](arg1);
 }
 
+export function DiscoverBootstrap(arg1) {
+  return window['go']['main']['App']['DiscoverBootstrap'](arg1);
+}
+
 export function EndSession() {
   return window['go']['main']['App']['EndSession']();
 }
@@ -34,12 +38,20 @@ export function Inspect(arg1) {
   return window['go']['main']['App']['Inspect'](arg1);
 }
 
+export function PrepareBootstrap(arg1) {
+  return window['go']['main']['App']['PrepareBootstrap'](arg1);
+}
+
 export function PreparePlan(arg1) {
   return window['go']['main']['App']['PreparePlan'](arg1);
 }
 
 export function PrepareTrust() {
   return window['go']['main']['App']['PrepareTrust']();
+}
+
+export function StartBootstrap(arg1, arg2) {
+  return window['go']['main']['App']['StartBootstrap'](arg1, arg2);
 }
 
 export function StartInstall(arg1) {

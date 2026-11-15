@@ -50,6 +50,7 @@ type planData struct {
 	snapshot         router.Snapshot
 	selection        Selection
 	configs          []payload
+	subscriptions    bool
 	artifacts        []catalog.Artifact
 	active           catalog.Component
 	uiPort           int
