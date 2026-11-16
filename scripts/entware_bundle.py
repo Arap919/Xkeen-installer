@@ -10,6 +10,8 @@ import copy
 import gzip
 import io
 import tarfile
+import time
+import urllib.error
 import json
 import pathlib
 import re
@@ -54,13 +56,20 @@ def fetch(url, limit):
     if context.verify_mode != ssl.CERT_REQUIRED or not context.check_hostname or context.cert_store_stats()['x509_ca'] == 0:
         raise ValueError('Certificate verification and trusted CA material are required')
     opener = urllib.request.build_opener(urllib.request.HTTPSHandler(context=context), HTTPSRedirect())
-    with opener.open(url, timeout=20) as response:
-        if response.status != 200:
-            raise ValueError('Entware download failed')
-        data = response.read(limit + 1)
-        if len(data) > limit:
-            raise ValueError('Entware download exceeds size limit')
-        return data
+    for attempt in range(3):
+        try:
+            with opener.open(url, timeout=20) as response:
+                if response.status != 200:
+                    raise ValueError('Entware download failed')
+                data = response.read(limit + 1)
+                if len(data) > limit:
+                    raise ValueError('Entware download exceeds size limit')
+                return data
+        except (TimeoutError, urllib.error.URLError) as error:
+            reason = error.reason if isinstance(error, urllib.error.URLError) else error
+            if not isinstance(reason, TimeoutError) or attempt == 2:
+                raise
+            time.sleep(2 ** attempt)
 
 
 def parse_index(data, origin):
@@ -219,6 +228,7 @@ def build_archive(base, lock, packages):
             if entry.name == 'etc/opkg.conf':
                 config += ''.join(line + '\n' for line in data.decode().splitlines() if line.startswith('arch '))
             members.append((copy.copy(entry), data))
+    opkg = '/opt/bin/env -i PATH=/opt/bin:/opt/sbin:/usr/bin:/usr/sbin:/bin:/sbin OPKG_CONF_DIR=/opt/.xkeen-installer-repository /opt/bin/opkg --conf /opt/etc/opkg-offline.conf'
     replaced = False
     rewritten = []
     for entry, data in members:
@@ -228,8 +238,8 @@ def build_archive(base, lock, packages):
             install = 'if ! opkg install $ipk'
             if script.count(update) != 1 or script.count(install) != 1:
                 raise ValueError('Unexpected upstream bootstrap commands; review required')
-            script = script.replace(update, 'if ! /opt/bin/opkg --conf /opt/etc/opkg-offline.conf update')
-            script = script.replace(install, 'if ! /opt/bin/opkg --conf /opt/etc/opkg-offline.conf install "$ipk"')
+            script = script.replace(update, 'if ! ' + opkg + ' update')
+            script = script.replace(install, 'if ! ' + opkg + ' install "$ipk"')
             data = script.encode()
             replaced = True
         elif entry.name == 'etc/opkg.conf':

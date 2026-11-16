@@ -6,6 +6,11 @@ import tarfile
 import tempfile
 import pathlib
 import ssl
+import urllib.error
+import http.server
+import threading
+import subprocess
+import shutil
 import unittest
 from unittest.mock import patch
 
@@ -99,6 +104,8 @@ class BundleTests(unittest.TestCase):
                 self.assertNotIn('! opkg update', install)
                 self.assertNotIn('! opkg install', install)
                 self.assertIn('/opt/etc/opkg-offline.conf', install)
+                self.assertIn('/opt/bin/env -i PATH=', install)
+                self.assertIn('OPKG_CONF_DIR=/opt/.xkeen-installer-repository', install)
                 self.assertIn('file:///opt/.xkeen-installer-repository', archive.extractfile('etc/opkg-offline.conf').read().decode())
                 self.assertEqual(archive.extractfile('.xkeen-installer-repository/app.ipk').read(), b'package')
             for data in ({}, {'app.ipk': b'packagf'}):
@@ -127,6 +134,39 @@ class DownloadTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             redirect.redirect_request(None, None, 302, 'downgrade', {}, 'http://bin.entware.net/app.ipk')
 
+    def test_transient_timeout_retries_same_https_without_fallback(self):
+        with patch.object(bundle.urllib.request, 'build_opener') as factory, patch.object(bundle.time, 'sleep'):
+            factory.return_value.open.side_effect = urllib.error.URLError(TimeoutError('transient'))
+            with self.assertRaises(urllib.error.URLError):
+                bundle.fetch('https://bin.entware.net/app.ipk', 100)
+            self.assertEqual(factory.return_value.open.call_count, 3)
+            self.assertTrue(all(call.args[0] == 'https://bin.entware.net/app.ipk' for call in factory.return_value.open.call_args_list))
+
+    def test_real_tls_rejects_untrusted_certificate_without_importing_ca(self):
+        if shutil.which('openssl') is None:
+            self.skipTest('openssl is required for the isolated TLS fixture')
+        with tempfile.TemporaryDirectory() as directory:
+            key = str(pathlib.Path(directory) / 'fixture.key')
+            cert = str(pathlib.Path(directory) / 'fixture.crt')
+            subprocess.run(['openssl', 'req', '-x509', '-newkey', 'rsa:2048', '-nodes', '-keyout', key, '-out', cert, '-days', '1', '-subj', '/CN=localhost'], check=True, capture_output=True)
+            context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+            context.load_cert_chain(cert, key)
+            server = http.server.HTTPServer(('127.0.0.1', 0), http.server.BaseHTTPRequestHandler)
+            server.socket = context.wrap_socket(server.socket, server_side=True)
+            thread = threading.Thread(target=server.serve_forever, daemon=True)
+            thread.start()
+            try:
+                # Only the URL allowlist is relaxed to reach this loopback fixture;
+                # fetch still constructs its real, certificate-validating SSL context.
+                with patch.object(bundle, 'secure_url', side_effect=lambda value: value):
+                    with self.assertRaises(urllib.error.URLError) as result:
+                        bundle.fetch('https://127.0.0.1:' + str(server.server_port) + '/fixture', 100)
+                    self.assertIsInstance(result.exception.reason, ssl.SSLCertVerificationError)
+            finally:
+                server.shutdown()
+                server.server_close()
+                thread.join(timeout=2)
+
     def test_untrusted_certificate_has_no_fallback(self):
         with patch.object(bundle.urllib.request, 'build_opener') as factory:
             factory.return_value.open.side_effect = ssl.SSLCertVerificationError('untrusted fixture')
@@ -136,6 +176,8 @@ class DownloadTests(unittest.TestCase):
 
     def test_missing_trust_material_stops_before_network(self):
         with patch.object(bundle.ssl, 'create_default_context') as context, patch.object(bundle.urllib.request, 'build_opener') as factory:
+            context.return_value.verify_mode = ssl.CERT_REQUIRED
+            context.return_value.check_hostname = True
             context.return_value.cert_store_stats.return_value = {'x509_ca': 0}
             with self.assertRaises(ValueError):
                 bundle.fetch('https://bin.entware.net/app.ipk', 100)
