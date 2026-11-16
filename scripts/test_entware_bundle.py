@@ -26,6 +26,15 @@ class RepositoryTests(unittest.TestCase):
         self.assertEqual([p['name'] for p in bundle.closure(records, ['app'])], ['app', 'lib', 'runtime', 'tool'])
         self.assertEqual(bundle.closure(records, ['app']), bundle.closure(records, ['app', 'lib']))
 
+    def test_virtual_dependency_requires_explicit_matching_provider(self):
+        text = stanza('app', 'ca-certs') + stanza('ca-bundle').replace('Depends: ', 'Provides: ca-certs\nDepends: ')
+        records = bundle.parse_index(text.encode(), 'https://bin.entware.net/test')
+        with self.assertRaises(ValueError):
+            bundle.closure(records, ['app'])
+        self.assertEqual([p['name'] for p in bundle.closure(records, ['app'], {'ca-certs': 'ca-bundle'})], ['app', 'ca-bundle'])
+        with self.assertRaises(ValueError):
+            bundle.closure(records, ['app'], {'ca-certs': 'app'})
+
     def test_missing_dependency_and_unsupported_alternative_fail_closed(self):
         for depends in ('missing', 'lib | other'):
             records = bundle.parse_index(stanza('app', depends).encode(), 'https://bin.entware.net/test')

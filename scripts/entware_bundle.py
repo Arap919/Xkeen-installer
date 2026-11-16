@@ -91,20 +91,33 @@ def parse_index(data, origin):
         if not re.fullmatch(r'[0-9]+', fields['Size']) or not 0 < int(fields['Size']) <= 512 << 20 or not re.fullmatch(r'[a-f0-9]{64}', fields['SHA256sum']):
             raise ValueError('Invalid metadata for ' + name + ': size=' + fields['Size'] + ', sha256_length=' + str(len(fields['SHA256sum'])))
         records[name] = {'name': name, 'version': fields['Version'], 'architecture': fields['Architecture'],
-                         'depends': fields.get('Depends', ''), 'filename': fields['Filename'],
+                         'depends': fields.get('Depends', ''), 'provides': fields.get('Provides', ''), 'filename': fields['Filename'],
                          'size': int(fields['Size']), 'sha256': fields['SHA256sum'],
                          'url': origin.rstrip('/') + '/' + fields['Filename'], 'stanza': block + '\n\n'}
     return records
 
 
-def closure(records, roots):
+def closure(records, roots, providers=None):
     selected = {}
+    providers = providers or {}
 
     def visit(name):
         if name in selected:
             return
         if name not in records:
-            raise ValueError('Missing dependency: ' + name)
+            provider = providers.get(name)
+            if provider not in records:
+                raise ValueError('Missing dependency: ' + name)
+            supplied = []
+            for expression in records[provider]['provides'].split(','):
+                match = DEPENDENCY.fullmatch(expression.strip())
+                if match:
+                    supplied.append(match.group(1))
+            if name not in supplied:
+                raise ValueError('Selected provider does not provide ' + name)
+            name = provider
+            if name in selected:
+                return
         record = records[name]
         selected[name] = record
         for dependency in record['depends'].split(','):
@@ -140,7 +153,7 @@ def validate_lock(lock):
         if list(parsed.values()) != [record]:
             raise ValueError('Locked metadata does not match its package stanza')
         records[record['name']] = record
-    if closure(records, lock['roots']) != lock['packages']:
+    if closure(records, lock['roots'], lock.get('providers')) != lock['packages']:
         raise ValueError('Lock is not a complete canonical dependency closure')
     if sum(record['size'] for record in lock['packages']) > 256 << 20:
         raise ValueError('Offline repository exceeds size limit')
@@ -154,7 +167,8 @@ def resolve(arch):
         data = fetch(origin + '/Packages', 16 << 20)
         origins.append({'url': origin + '/Packages', 'sha256': hashlib.sha256(data).hexdigest()})
         records.update(parse_index(data, origin))  # Keenetic's higher-priority feed wins.
-    lock = {'format': 1, 'arch': arch, 'roots': ROOTS, 'indexes': origins, 'packages': closure(records, ROOTS)}
+    providers = {'ca-certs': 'ca-bundle'}
+    lock = {'format': 1, 'arch': arch, 'roots': ROOTS, 'providers': providers, 'indexes': origins, 'packages': closure(records, ROOTS, providers)}
     validate_lock(lock)
     return lock
 
