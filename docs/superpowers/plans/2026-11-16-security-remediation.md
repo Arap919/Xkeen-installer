@@ -250,3 +250,18 @@ Environment observations: HTTPS requests to bin.entware.net timed out during TLS
 - Evidence limits: isolated Linux userspace only; real Keenetic hardware, firmware extraction/RCI and SSH credential handoff were not validated. Existing compromise or concurrent root-level package administration is not attested by these checks. SEC-007 remains separate; no distribution approval is implied.
 - Ruling: existing read-only discovery with opkg list-installed is retained; the new gates precede package update/install and hook execution. That query does not fetch packages or configure pending hooks.
 - Final status: security review accepted; waiting for final native desktop CI after commit. Implementation commit/run will be recorded after those actions.
+
+### SEC-001 desktop packaging follow-up (2026-11-17)
+
+Implementation commit 0165371e131a0824ef50470f85efe27ef763f92c was pushed; a large
+HTTP push initially failed and succeeded with a command-local 128 MiB postBuffer
+without disabling TLS or changing global Git settings. CI run 43947013140 passed
+Linux/Windows and all macOS Intel source/binary checks, but DMG creation failed
+with No space left on device while copying the larger executable into its mounted
+image. The same step failed again on a fresh Intel runner. Local ARM64 automatic
+DMG creation succeeded with 95 GiB host space available; the failure is not claimed
+to reproduce on every OS. The packaging follow-up explicitly sizes the image from
+logical regular-file bytes plus 64 MiB metadata headroom, excluding symlinks;
+format, app contents, release conditions and security gates are retained. Final
+native CI is still required. The first ARM64 queued job was cancelled by GitHub
+when a new single-job attempt was created; it was not a passing ARM64 result.

@@ -189,7 +189,10 @@ jobs:
           mkdir -p release build/dmg
           ditto build/bin/xkeen-installer.app build/dmg/xkeen-installer.app
           ln -s /Applications build/dmg/Applications
-          hdiutil create -volname "XKeen Installer" -srcfolder build/dmg -ov -format UDZO "release/xkeen-installer-$RELEASE_VERSION-$BUILD_TARGET.dmg"
+          DMG_SIZE_MIB=$(python3 -c 'from pathlib import Path; total=sum(p.stat().st_size for p in Path("build/dmg").rglob("*") if not p.is_symlink() and p.is_file()); print((total+1048575)//1048576+64)')
+          echo "DMG filesystem capacity: ${DMG_SIZE_MIB} MiB (logical files plus 64 MiB headroom)"
+          df -h build/dmg
+          hdiutil create -volname "XKeen Installer" -srcfolder build/dmg -size "${DMG_SIZE_MIB}m" -ov -format UDZO "release/xkeen-installer-$RELEASE_VERSION-$BUILD_TARGET.dmg"
       - name: Package Linux Debian installer
         if: runner.os == 'Linux'
         env:
