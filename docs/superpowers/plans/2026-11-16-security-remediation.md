@@ -59,7 +59,7 @@ P1 means address or explicitly resolve before broad distribution. P2 means a con
 
 ### SEC-001: Authenticate all Entware package downloads
 
-**Status:** Open
+**Status:** In progress; offline delivery design approved; implementation and isolated verification pending
 **Priority:** P1
 **Evidence:** `internal/bootstrap/archives/{arm64,mips,mipsel}.tar.gz`, members `etc/opkg.conf` and ARM64 `bin/install`; `internal/install/runner.go`, dependency stage; `internal/catalog/catalog.go`.
 **Attack prerequisites:** An attacker can alter the router's HTTP download traffic or responses. Unauthenticated package metadata can defeat checksums delivered through the same channel.
@@ -209,3 +209,30 @@ For each SEC ID record: implementation commit, affected platforms, verification 
 - Full native CI evidence: [run 43769000738](https://github.com/Arap919/Xkeen-installer/actions/runs/43769000738), commit `617c94d4141b88d4acf03f3905e6968d22532efa`, completed successfully. Linux AMD64 job `132980473905`, Windows AMD64 `132980473932`, macOS AMD64 `132980474021`, macOS ARM64 `132980474040`: production source and binary scans reported no vulnerabilities; executable metadata confirmed go1.26.11 and expected GOOS/GOARCH/tags; all eight Go packages, vet, frontend typecheck, 58 tests, frontend build, native desktop build, packaging and upload passed. Release job was skipped. Old local and published binaries remain outside this verification.
 - Final reviewer decision: independent security specialist retrieved all four native job logs, confirmed the checked-out commit, tests, source/binary scans, embedded toolchain and target metadata, and recommended closure. No unresolved advisory remained in these scans.
 - Final status: CLOSED for the new CI candidates. Broad distribution remains gated by the other open SEC findings, including SEC-006. No real-router installation or exploitation was performed.
+
+## SEC-001 delivery design proposal (2026-11-16)
+
+Current trust-chain trace:
+- All three bundled archives authenticate their compressed bootstrap bytes through catalog SHA-256 pins, but each bin/install subsequently runs opkg update and installs 17 named base packages plus their dependency closure through two HTTP feeds. The same scripts start Dropbear; credential hardening remains SEC-007.
+- The later installer runs opkg update and installs selected dependency names in internal/install/runner.go. Installing the reviewed watchdog IPK can also resolve transitive dependencies. Existing feed configuration and TLS downloader behavior are not currently validated.
+- Upstream opkg packaging leaves signature-check configuration commented out. A post-bootstrap HTTPS URL edit alone cannot authenticate the earliest fetch.
+
+Proposed design: bundle an independently reviewed, immutable offline package repository for each architecture, including the complete bootstrap and installer dependency closure. Fetch source metadata and packages over certificate-validated HTTPS during bundle preparation, verify package hashes before inclusion, record package/version/digest provenance, and pin final deterministic archive bytes. During initial bootstrap, opkg may read only that local repository. During later installation, transfer the same reviewed local repository over the authenticated SSH transport and invoke opkg with an explicit private config containing only that local source. Package hooks must be reviewed for their own downloads and tested with network access denied. Missing or modified local metadata/packages fail before installation; no network fallback. Reject insecure existing feed configurations with Russian migration guidance before opkg runs, without silently rewriting user files. Preserve existing approval, backup, and archive/path checks.
+
+Alternative: provision a verified TLS-capable downloader and CA material into the initial archive, and strictly validate all feed URLs, redirect behavior, downloader flags/environment, and trust material before any opkg call. This is smaller on disk but makes the router downloader, runtime libraries, TLS settings, and repository changes part of the installation trust boundary.
+
+Recommendation: offline reviewed package closure. Tradeoff: larger desktop packages and a maintainer-controlled package refresh process; authentication no longer depends on the router having working TLS before installation. Existing configurations are preserved. This does not authorize release publication or changing a real router.
+
+Required verification: isolated package tampering, metadata tampering, missing package/trust data and no network fallback; actual opkg bootstrap/install fixtures on ARM64, MIPS and MIPSel; independent security review before closing SEC-001. The design is a proposal, not an implemented fix.
+
+## SEC-001 implementation checklist
+
+Approved by the user: offline reviewed package closure, as proposed above. Work remains in the existing checkout. Implement locally, then use a separate security reviewer; no release publication.
+
+- [ ] Add `scripts/entware_bundle.py` and focused Python fixtures: HTTPS-only bounded downloads with downgrade rejection; strict repository parsing and dependency closure; separately reviewed lock metadata; deterministic offline bundle generation with pinned original archives and IPK hashes. Tests must reject tampering, untrusted certificates, missing trust material and missing dependencies without a network fallback.
+- [ ] Generate per-architecture locked repositories, inspect all package installation hooks for network fetches and credential/service side effects, then update the three bootstrap archives, catalog pins and `docs/entware-byte-pins.md`. Initial opkg calls must use only the local repository.
+- [ ] Add authenticated offline-repository extraction in `internal/bootstrap`, preserving existing archive validation. Add negative fixtures for changed/missing metadata, modified IPKs and unsafe paths.
+- [ ] In `internal/install/runner.go`, validate existing feed configuration before package/service mutations, stage the verified local repository through the existing SSH transport, and use an explicit local-only opkg config for dependencies and watchdog hooks. Keep backups and existing configuration. Add tests that an HTTP feed or missing trust material stops before opkg and that no command uses network feeds.
+- [ ] Run Go/frontend checks and isolated clean/existing opkg tests on ARM64/MIPS/MIPSel with network denied. Obtain independent security review, fix findings, record remaining evidence honestly, then close SEC-001 only if its acceptance is met.
+
+Environment observations: HTTPS requests to bin.entware.net timed out during TLS negotiation on this host; Docker client exists but its daemon socket is unavailable. These are verification blockers, not permission to use HTTP or disable certificate checks.
