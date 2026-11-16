@@ -1,7 +1,7 @@
 # Security Remediation Plan and Audit Register
 
 **Audit date:** 2026-11-16
-**Status:** Remediation in progress; SEC-005 closed for the new CI build candidates. Other findings remain open. No exploitation demonstrated.
+**Status:** Remediation in progress; SEC-001 and SEC-005 closed for the reviewed CI build candidates. Other findings remain open. No exploitation demonstrated.
 **Goal:** Address the security findings from the source and local-artifact audit before broad installer distribution.
 **Architecture:** Preserve the existing SSH transport, reviewed artifact catalog, installation approval gates, and private TLS storage. Remediate each trust boundary independently; do not redesign unrelated installation behavior.
 **Tech stack:** Go, Wails v2, TypeScript, Python, Entware/opkg, GitHub Actions, Windows/macOS/Linux packaging.
@@ -59,7 +59,7 @@ P1 means address or explicitly resolve before broad distribution. P2 means a con
 
 ### SEC-001: Authenticate all Entware package downloads
 
-**Status:** Implemented and independently reviewed; final desktop CI pending
+**Status:** Closed for commit f9be0b2 CI candidates and isolated package fixtures; real firmware handoff remains unverified
 **Priority:** P1
 **Evidence:** `internal/bootstrap/archives/{arm64,mips,mipsel}.tar.gz`, members `etc/opkg.conf` and ARM64 `bin/install`; `internal/install/runner.go`, dependency stage; `internal/catalog/catalog.go`.
 **Attack prerequisites:** An attacker can alter the router's HTTP download traffic or responses. Unauthenticated package metadata can defeat checksums delivered through the same channel.
@@ -229,13 +229,13 @@ Required verification: isolated package tampering, metadata tampering, missing p
 
 Approved by the user: offline reviewed package closure, as proposed above. Work remains in the existing checkout. Implement locally, then use a separate security reviewer; no release publication.
 
-- [ ] Add `scripts/entware_bundle.py` and focused Python fixtures: HTTPS-only bounded downloads with downgrade rejection; strict repository parsing and dependency closure; separately reviewed lock metadata; deterministic offline bundle generation with pinned original archives and IPK hashes. Tests must reject tampering, untrusted certificates, missing trust material and missing dependencies without a network fallback.
-- [ ] Generate per-architecture locked repositories, inspect all package installation hooks for network fetches and credential/service side effects, then update the three bootstrap archives, catalog pins and `docs/entware-byte-pins.md`. Initial opkg calls must use only the local repository.
-- [ ] Add authenticated offline-repository extraction in `internal/bootstrap`, preserving existing archive validation. Add negative fixtures for changed/missing metadata, modified IPKs and unsafe paths.
-- [ ] In `internal/install/runner.go`, validate existing feed configuration before package/service mutations, stage the verified local repository through the existing SSH transport, and use an explicit local-only opkg config for dependencies and watchdog hooks. Keep backups and existing configuration. Add tests that an HTTP feed or missing trust material stops before opkg and that no command uses network feeds.
-- [ ] Run Go/frontend checks and isolated clean/existing opkg tests on ARM64/MIPS/MIPSel with network denied. Obtain independent security review, fix findings, record remaining evidence honestly, then close SEC-001 only if its acceptance is met.
+- [x] Add `scripts/entware_bundle.py` and focused Python fixtures: HTTPS-only bounded downloads with downgrade rejection; strict repository parsing and dependency closure; separately reviewed lock metadata; deterministic offline bundle generation with pinned original archives and IPK hashes. Tests must reject tampering, untrusted certificates, missing trust material and missing dependencies without a network fallback.
+- [x] Generate per-architecture locked repositories, inspect all package installation hooks for network fetches and credential/service side effects, then update the three bootstrap archives, catalog pins and `docs/entware-byte-pins.md`. Initial opkg calls must use only the local repository.
+- [x] Add authenticated offline-repository extraction in `internal/bootstrap`, preserving existing archive validation. Add negative fixtures for changed/missing metadata, modified IPKs and unsafe paths.
+- [x] In `internal/install/runner.go`, validate existing feed configuration before package/service mutations, stage the verified local repository through the existing SSH transport, and use an explicit local-only opkg config for dependencies and watchdog hooks. Keep backups and existing configuration. Add tests that an HTTP feed or missing trust material stops before opkg and that no command uses network feeds.
+- [x] Run Go/frontend checks and isolated clean/existing opkg tests on ARM64/MIPS/MIPSel with network denied. Obtain independent security review, fix findings, record remaining evidence honestly, then close SEC-001 only if its acceptance is met.
 
-Environment observations: HTTPS requests to bin.entware.net timed out during TLS negotiation on this host; Docker client exists but its daemon socket is unavailable. These are verification blockers, not permission to use HTTP or disable certificate checks.
+Initial environment observations (subsequently resolved for isolated verification): HTTPS requests to bin.entware.net timed out during TLS negotiation on this host; Docker client exists but its daemon socket is unavailable. These are verification blockers, not permission to use HTTP or disable certificate checks.
 
 ## SEC-001 execution record (2026-11-16)
 
@@ -249,7 +249,7 @@ Environment observations: HTTPS requests to bin.entware.net timed out during TLS
 - Isolated execution: real bin/install and full dependency installation succeeded on ARM64, MIPS, MIPSel with network disabled. Final TestNativeOfflinePackagePhase passed ARM64 2.58s, MIPS 31.50s, MIPSel 36.34s, including the pinned watchdog IPK, hostile env/additional configs/stale lists, blocked unfinished/old hooks, harmless reproduction of the previous unrelated-postinst path, and forced locales generation failure. proot 5.5.0/QEMU used only in Docker; older broken proot excluded from evidence.
 - Evidence limits: isolated Linux userspace only; real Keenetic hardware, firmware extraction/RCI and SSH credential handoff were not validated. Existing compromise or concurrent root-level package administration is not attested by these checks. SEC-007 remains separate; no distribution approval is implied.
 - Ruling: existing read-only discovery with opkg list-installed is retained; the new gates precede package update/install and hook execution. That query does not fetch packages or configure pending hooks.
-- Final status: security review accepted; waiting for final native desktop CI after commit. Implementation commit/run will be recorded after those actions.
+- Final status: CLOSED for implementation commit 0165371e131a0824ef50470f85efe27ef763f92c plus packaging fix f9be0b242963b0cbc0b0e50c43f63ebc497322c3, subject to the evidence limits above.
 
 ### SEC-001 desktop packaging follow-up (2026-11-17)
 
@@ -265,3 +265,17 @@ logical regular-file bytes plus 64 MiB metadata headroom, excluding symlinks;
 format, app contents, release conditions and security gates are retained. Final
 native CI is still required. The first ARM64 queued job was cancelled by GitHub
 when a new single-job attempt was created; it was not a passing ARM64 result.
+
+### SEC-001 final closure (2026-11-17)
+
+- Final native CI [run 43963707188](https://github.com/Arap919/Xkeen-installer/actions/runs/43963707188) succeeded on exact head f9be0b242963b0cbc0b0e50c43f63ebc497322c3. Jobs: macOS ARM64 133637599216, macOS AMD64 133637599264, Windows AMD64 133637599339, Linux AMD64 133637599402.
+- Independent security reviewer read all four complete job logs and verified checkout SHA, embedded Go 1.26.11, expected GOOS/GOARCH and consistent production source/binary tags. Both govulncheck gates reported no vulnerabilities on each platform; Go tests/vet and frontend 58/58 tests passed.
+- Both DMGs were created/uploaded (explicit capacity 145 MiB ARM64, 146 MiB Intel); Windows NSIS and Linux DEB were uploaded. All four artifact records bind to the same SHA. Release skipped; no publication.
+- Reviewer confirmed closure for the reviewed candidates and isolated userspace fixtures. Real Keenetic firmware extraction/RCI/SSH handoff and previously distributed binaries remain outside this evidence.
+
+## SEC-007 initial verification (2026-11-17)
+
+- Read-only inspection of the exact bundled packages: opt-ndmsv2 1.0-17 on all three architectures contains identical root account data (passwd file SHA256 51f28bc4f23398131fac87e065825e7349621ea1b5d3f141bb1570b28e0f250b).
+- Disposable network-denied Linux containers compared crypt(advertised default, stored hash): true for ARM64, MIPS and MIPSel. Only boolean outcomes were printed; no account hash or private host key was logged.
+- Dropbear 2026.94-4 has identical S51dropbear SHA256 3a531c9a5f4aab0797ae8d40d0235966100ec13139a4bbe2078cbc76d0d1ee4e. It invokes dropbear with port and pidfile only, without disabling password authentication. Its postinst generates missing host keys but does not start the service; bin/install explicitly starts it after key regeneration.
+- This establishes reusable account credentials and the configured startup path, not real-router reachability or a successful remote login. Full isolated bootstrap-to-SSH tests remain required. No SEC-007 product code changed.
