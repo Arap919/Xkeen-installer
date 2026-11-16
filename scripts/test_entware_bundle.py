@@ -1,6 +1,9 @@
 import hashlib
 import importlib.util
 import io
+import gzip
+import tarfile
+import tempfile
 import pathlib
 import ssl
 import unittest
@@ -34,6 +37,14 @@ class RepositoryTests(unittest.TestCase):
             with self.subTest(text=text), self.assertRaises(ValueError):
                 bundle.parse_index(text.encode(), 'https://bin.entware.net/test')
 
+    def test_unselected_large_package_does_not_block_small_closure(self):
+        index = stanza('app') + stanza('large').replace('Size: 7', 'Size: 67108865')
+        records = bundle.parse_index(index.encode(), 'https://bin.entware.net/test')
+        self.assertEqual([p['name'] for p in bundle.closure(records, ['app'])], ['app'])
+        lock = {'format': 1, 'arch': 'arm64', 'roots': ['large'], 'packages': [records['large']]}
+        with self.assertRaises(ValueError):
+            bundle.validate_lock(lock)
+
     def test_package_tampering_and_truncation_rejected(self):
         record = bundle.parse_index(stanza('app').encode(), 'https://bin.entware.net/test')['app']
         bundle.verify(record, b'package')
@@ -48,6 +59,47 @@ class RepositoryTests(unittest.TestCase):
         for change in ({'roots': ['missing']}, {'packages': [dict(record, url='http://bin.entware.net/app.ipk')]}, {'packages': [dict(record, sha256='bad')]}, {'packages': [record, record]}, {'arch': 'other'}):
             with self.subTest(change=change), self.assertRaises(ValueError):
                 bundle.validate_lock(dict(good, **change))
+
+
+class BundleTests(unittest.TestCase):
+    def fixture(self):
+        install = b'if ! opkg update >/dev/null 2>&1\nfor ipk in libgcc libc; do\nif ! opkg install $ipk >/dev/null 2>&1\n'
+        stream = io.BytesIO()
+        with tarfile.open(fileobj=stream, mode='w:gz') as archive:
+            for name, data in [('bin/install', install), ('etc/opkg.conf', b'src/gz entware http://bin.entware.net/test\n')]:
+                entry = tarfile.TarInfo(name)
+                entry.size = len(data)
+                archive.addfile(entry, io.BytesIO(data))
+        base = stream.getvalue()
+        record = bundle.parse_index(stanza('app').encode(), 'https://bin.entware.net/test')['app']
+        lock = {'format': 1, 'arch': 'arm64', 'roots': ['app'], 'packages': [record]}
+        return base, lock
+
+    def test_bundle_deterministic_local_only_and_tamper_rejection(self):
+        base, lock = self.fixture()
+        with patch.dict(bundle.BASE_PINS, {'arm64': {'size': len(base), 'sha256': hashlib.sha256(base).hexdigest()}}):
+            first = bundle.build_archive(base, lock, {'app.ipk': b'package'})
+            self.assertEqual(first, bundle.build_archive(base, lock, {'app.ipk': b'package'}))
+            with tarfile.open(fileobj=io.BytesIO(first)) as archive:
+                install = archive.extractfile('bin/install').read().decode()
+                self.assertNotIn('! opkg update', install)
+                self.assertNotIn('! opkg install', install)
+                self.assertIn('/opt/etc/opkg-offline.conf', install)
+                self.assertIn('file:///opt/.xkeen-installer-repository', archive.extractfile('etc/opkg-offline.conf').read().decode())
+                self.assertEqual(archive.extractfile('.xkeen-installer-repository/app.ipk').read(), b'package')
+            for data in ({}, {'app.ipk': b'packagf'}):
+                with self.assertRaises(ValueError):
+                    bundle.build_archive(base, lock, data)
+            with self.assertRaises(ValueError):
+                bundle.build_archive(base + b'tamper', lock, {'app.ipk': b'package'})
+
+    def test_bad_download_does_not_publish_partial_repository(self):
+        _, lock = self.fixture()
+        with tempfile.TemporaryDirectory() as directory, patch.object(bundle, 'fetch', return_value=b'packagf'):
+            output = pathlib.Path(directory) / 'repository'
+            with self.assertRaises(ValueError):
+                bundle.download_repository(lock, output)
+            self.assertFalse(output.exists())
 
 
 class DownloadTests(unittest.TestCase):

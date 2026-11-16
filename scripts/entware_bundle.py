@@ -6,6 +6,10 @@ fetch consumes an explicitly supplied reviewed lock and never refreshes metadata
 """
 import argparse
 import hashlib
+import copy
+import gzip
+import io
+import tarfile
 import json
 import pathlib
 import re
@@ -18,8 +22,18 @@ ROOTS = ('libgcc libc libpthread librt entware-release findutils grep ldconfig l
          'zoneinfo-asia zoneinfo-europe opt-ndmsv2 dropbear poorbox busybox '
          'curl jq ip-full iptables ipset ca-bundle coreutils-uname coreutils-nohup '
          'conntrack cron python3 ca-certificates python3-yaml wget-ssl').split()
+BASE_PINS = {
+    'arm64': {'size': 3232671, 'sha256': '64451a3a70ca85aaab3b0677814f6b58f7994793ed6b120eddc36a16639c15d1'},
+    'mips': {'size': 3503782, 'sha256': 'a8ca977def91f1a12ab4675e20e89a4c05700cb932ef9e41b88e5cb8388f8fe2'},
+    'mipsel': {'size': 3304180, 'sha256': '44d94db8b4eb0ccd950552bc71c17ae50777dcac89f8aae949d7140c55e76c9f'},
+}
 NAME = re.compile(r'[a-zA-Z0-9][a-zA-Z0-9+_.-]*\Z')
-FILENAME = re.compile(r'[a-zA-Z0-9][a-zA-Z0-9+_.~-]*\.ipk\Z')
+FILEBASE_PINS = {
+    'arm64': {'size': 3232671, 'sha256': '64451a3a70ca85aaab3b0677814f6b58f7994793ed6b120eddc36a16639c15d1'},
+    'mips': {'size': 3503782, 'sha256': 'a8ca977def91f1a12ab4675e20e89a4c05700cb932ef9e41b88e5cb8388f8fe2'},
+    'mipsel': {'size': 3304180, 'sha256': '44d94db8b4eb0ccd950552bc71c17ae50777dcac89f8aae949d7140c55e76c9f'},
+}
+NAME = re.compile(r'[a-zA-Z0-9][a-zA-Z0-9+_.~-]*\.ipk\Z')
 DEPENDENCY = re.compile(r'([a-zA-Z0-9][a-zA-Z0-9+_.-]*)(?:\s+\((?:>=|<=|=|>>|<<|>|<)\s+[^()\s]+\))?\Z')
 
 
@@ -79,8 +93,8 @@ def parse_index(data, origin):
         name = fields['Package']
         if not NAME.fullmatch(name) or name in records or not FILENAME.fullmatch(fields['Filename']):
             raise ValueError('Duplicate package or unsafe package filename')
-        if not re.fullmatch(r'[0-9]+', fields['Size']) or not 0 < int(fields['Size']) <= 64 << 20 or not re.fullmatch(r'[a-f0-9]{64}', fields['SHA256sum']):
-            raise ValueError('Missing or invalid package digest/size')
+        if not re.fullmatch(r'[0-9]+', fields['Size']) or not 0 < int(fields['Size']) <= 512 << 20 or not re.fullmatch(r'[a-f0-9]{64}', fields['SHA256sum']):
+            raise ValueError('Invalid metadata for ' + name + ': size=' + fields['Size'] + ', sha256_length=' + str(len(fields['SHA256sum'])))
         records[name] = {'name': name, 'version': fields['Version'], 'architecture': fields['Architecture'],
                          'depends': fields.get('Depends', ''), 'filename': fields['Filename'],
                          'size': int(fields['Size']), 'sha256': fields['SHA256sum'],
@@ -120,10 +134,12 @@ def validate_lock(lock):
     if lock.get('format') != 1 or lock.get('arch') not in FEEDS or not lock.get('roots') or not lock.get('packages'):
         raise ValueError('Invalid reviewed lock')
     records = {}
+    filenames = set()
     for record in lock['packages']:
         secure_url(record['url'])
-        if record['name'] in records:
-            raise ValueError('Duplicate locked package')
+        if record['name'] in records or record['filename'] in filenames or not 0 < record['size'] <= 64 << 20:
+            raise ValueError('Duplicate or oversized locked package')
+        filenames.add(record['filename'])
         origin = record['url'].rsplit('/', 1)[0]
         parsed = parse_index(record['stanza'].encode(), origin)
         if list(parsed.values()) != [record]:
@@ -163,6 +179,76 @@ def download_repository(lock, output):
         (output / name).write_bytes(data)
     (output / 'Packages').write_text(''.join(p['stanza'] for p in lock['packages']), encoding='utf-8')
     (output / 'reviewed-lock.json').write_text(json.dumps(lock, indent=2) + '\n', encoding='utf-8')
+
+
+def build_archive(base, lock, packages):
+    validate_lock(lock)
+    arch = lock['arch']
+    pin = BASE_PINS[arch]
+    if len(base) != pin['size'] or hashlib.sha256(base).hexdigest() != pin['sha256']:
+        raise ValueError('Original bootstrap archive does not match its reviewed pin')
+    expected = {p['filename'] for p in lock['packages']}
+    if set(packages) != expected:
+        raise ValueError('Missing or unexpected offline package bytes')
+    for record in lock['packages']:
+        verify(record, packages[record['filename']])
+    config = ('src xkeen file:///opt/.xkeen-installer-repository\n'
+              'dest root /\nlists_dir ext /opt/var/opkg-lists-offline\n')
+    # Preserve all original architecture priorities, with no network sources.
+    members = []
+    seen = set()
+    with tarfile.open(fileobj=io.BytesIO(base), mode='r:gz') as original:
+        for entry in original:
+            if entry.name in seen:
+                raise ValueError('Duplicate original archive member')
+            seen.add(entry.name)
+            data = original.extractfile(entry).read() if entry.isfile() else None
+            if entry.name == 'etc/opkg.conf':
+                config += ''.join(line + '\n' for line in data.decode().splitlines() if line.startswith('arch '))
+            members.append((copy.copy(entry), data))
+    replaced = False
+    rewritten = []
+    for entry, data in members:
+        if entry.name == 'bin/install':
+            script = data.decode()
+            update = 'if ! opkg update'
+            install = 'if ! opkg install $ipk'
+            if script.count(update) != 1 or script.count(install) != 1:
+                raise ValueError('Unexpected upstream bootstrap commands; review required')
+            script = script.replace(update, 'if ! /opt/bin/opkg --conf /opt/etc/opkg-offline.conf update')
+            script = script.replace(install, 'if ! /opt/bin/opkg --conf /opt/etc/opkg-offline.conf install "$ipk"')
+            data = script.encode()
+            replaced = True
+        elif entry.name == 'etc/opkg.conf':
+            data = config.encode()
+        entry.uid = entry.gid = entry.mtime = 0
+        entry.uname = entry.gname = ''
+        entry.pax_headers = {}
+        if data is not None:
+            entry.size = len(data)
+        rewritten.append((entry, data))
+    if not replaced or 'etc/opkg.conf' not in seen:
+        raise ValueError('Missing original bootstrap entrypoint or configuration')
+    additional = {'etc/opkg-offline.conf': config.encode(),
+                  '.xkeen-installer-repository/Packages': ''.join(p['stanza'] for p in lock['packages']).encode(),
+                  '.xkeen-installer-repository/reviewed-lock.json': (json.dumps(lock, indent=2) + '\n').encode()}
+    additional.update({'.xkeen-installer-repository/' + name: data for name, data in packages.items()})
+    stream = io.BytesIO()
+    with gzip.GzipFile(fileobj=stream, mode='wb', filename='', mtime=0) as compressed:
+        with tarfile.open(fileobj=compressed, mode='w', format=tarfile.GNU_FORMAT) as output:
+            for entry, data in rewritten:
+                output.addfile(entry, io.BytesIO(data) if data is not None else None)
+            for name, data in sorted(additional.items()):
+                if name in seen:
+                    raise ValueError('Offline archive member collides with original')
+                entry = tarfile.TarInfo(name)
+                entry.mode = 0o600
+                entry.size = len(data)
+                output.addfile(entry, io.BytesIO(data))
+    result = stream.getvalue()
+    if len(result) > 64 << 20:
+        raise ValueError('Bootstrap archive exceeds reviewed transfer limits')
+    return result
 
 
 def main():
