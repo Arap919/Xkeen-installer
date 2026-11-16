@@ -28,12 +28,7 @@ BASE_PINS = {
     'mipsel': {'size': 3304180, 'sha256': '44d94db8b4eb0ccd950552bc71c17ae50777dcac89f8aae949d7140c55e76c9f'},
 }
 NAME = re.compile(r'[a-zA-Z0-9][a-zA-Z0-9+_.-]*\Z')
-FILEBASE_PINS = {
-    'arm64': {'size': 3232671, 'sha256': '64451a3a70ca85aaab3b0677814f6b58f7994793ed6b120eddc36a16639c15d1'},
-    'mips': {'size': 3503782, 'sha256': 'a8ca977def91f1a12ab4675e20e89a4c05700cb932ef9e41b88e5cb8388f8fe2'},
-    'mipsel': {'size': 3304180, 'sha256': '44d94db8b4eb0ccd950552bc71c17ae50777dcac89f8aae949d7140c55e76c9f'},
-}
-NAME = re.compile(r'[a-zA-Z0-9][a-zA-Z0-9+_.~-]*\.ipk\Z')
+FILENAME = re.compile(r'[a-zA-Z0-9][a-zA-Z0-9+_.~-]*\.ipk\Z')
 DEPENDENCY = re.compile(r'([a-zA-Z0-9][a-zA-Z0-9+_.-]*)(?:\s+\((?:>=|<=|=|>>|<<|>|<)\s+[^()\s]+\))?\Z')
 
 
