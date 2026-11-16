@@ -32,9 +32,10 @@ jobs:
           ROUTER_ARCH: ${{ matrix.arch }}
         run: |
           mkdir fixtures
-          python3 scripts/entware_bundle.py resolve "$ROUTER_ARCH" "fixtures/$ROUTER_ARCH-candidate-lock.json"
+          python3 scripts/entware_bundle.py resolve "$ROUTER_ARCH" "fixtures/$ROUTER_ARCH-candidate-lock.json" --index-dir fixtures/indexes
           python3 scripts/entware_bundle.py fetch "fixtures/$ROUTER_ARCH-candidate-lock.json" fixtures/repository
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+      - if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: entware-candidate-${{ matrix.arch }}
           path: fixtures/

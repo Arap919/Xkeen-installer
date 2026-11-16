@@ -68,7 +68,7 @@ def parse_index(data, origin):
     if len(data) > 16 << 20 or b'\x00' in data:
         raise ValueError('Invalid package index')
     records = {}
-    for block in data.decode('utf-8').replace('\r\n', '\n').strip().split('\n\n'):
+    for block in data.decode('utf-8').replace('\r\n', '\n').strip('\n').split('\n\n'):
         fields = {}
         last = None
         for line in block.splitlines():
@@ -159,12 +159,16 @@ def validate_lock(lock):
         raise ValueError('Offline repository exceeds size limit')
 
 
-def resolve(arch):
+def resolve(arch, index_dir=None):
     records = {}
     origins = []
     base = 'https://bin.entware.net/' + FEEDS[arch]
     for origin in (base, base + '/keenetic'):
         data = fetch(origin + '/Packages', 16 << 20)
+        if index_dir is not None:
+            index_dir.mkdir(parents=True, exist_ok=True)
+            name = 'keenetic.Packages' if origin.endswith('/keenetic') else 'main.Packages'
+            (index_dir / name).write_bytes(data)
         origins.append({'url': origin + '/Packages', 'sha256': hashlib.sha256(data).hexdigest()})
         records.update(parse_index(data, origin))  # Keenetic's higher-priority feed wins.
     providers = {'ca-certs': 'ca-bundle'}
@@ -266,16 +270,29 @@ def main():
     resolve_parser = commands.add_parser('resolve', help='Create a candidate lock for human/security review')
     resolve_parser.add_argument('arch', choices=FEEDS)
     resolve_parser.add_argument('output', type=pathlib.Path)
+    resolve_parser.add_argument('--index-dir', type=pathlib.Path)
     fetch_parser = commands.add_parser('fetch', help='Fetch exact package bytes from an explicitly reviewed lock')
     fetch_parser.add_argument('lock', type=pathlib.Path)
     fetch_parser.add_argument('output', type=pathlib.Path)
+    build_parser = commands.add_parser('build', help='Build an offline archive from reviewed local package bytes')
+    build_parser.add_argument('lock', type=pathlib.Path)
+    build_parser.add_argument('repository', type=pathlib.Path)
+    build_parser.add_argument('original', type=pathlib.Path)
+    build_parser.add_argument('output', type=pathlib.Path)
     args = parser.parse_args()
     if args.command == 'resolve':
-        lock = resolve(args.arch)
+        lock = resolve(args.arch, args.index_dir)
         with args.output.open('x', encoding='utf-8') as output:
             output.write(json.dumps(lock, indent=2) + '\n')
-    else:
+    elif args.command == 'fetch':
         download_repository(json.loads(args.lock.read_text()), args.output)
+    else:
+        lock = json.loads(args.lock.read_text())
+        validate_lock(lock)
+        packages = {p['filename']: (args.repository / p['filename']).read_bytes() for p in lock['packages']}
+        data = build_archive(args.original.read_bytes(), lock, packages)
+        with args.output.open('xb') as output:
+            output.write(data)
 
 
 if __name__ == '__main__':

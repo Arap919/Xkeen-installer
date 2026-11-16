@@ -54,6 +54,11 @@ class RepositoryTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             bundle.validate_lock(lock)
 
+    def test_index_stanza_roundtrip_preserves_description_whitespace(self):
+        text = stanza('app').rstrip('\n') + '\nDescription: fixture\n continued description \n\n' + stanza('other')
+        record = bundle.parse_index(text.encode(), 'https://bin.entware.net/test')['app']
+        bundle.validate_lock({'format': 1, 'arch': 'arm64', 'roots': ['app'], 'packages': [record]})
+
     def test_package_tampering_and_truncation_rejected(self):
         record = bundle.parse_index(stanza('app').encode(), 'https://bin.entware.net/test')['app']
         bundle.verify(record, b'package')
