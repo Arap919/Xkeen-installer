@@ -2,6 +2,12 @@ name: Prepare Entware security fixtures
 
 on:
   workflow_dispatch:
+  push:
+    branches: [feature/installer]
+    paths:
+      - scripts/entware_bundle.py
+      - scripts/test_entware_bundle.py
+      - .github/workflows/entware-fixtures.yml
 
 permissions:
   contents: read
