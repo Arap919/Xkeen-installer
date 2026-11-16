@@ -36,7 +36,7 @@ type Integrity struct {
 }
 
 // Artifact is a download contract, not evidence of installation. Size zero means unknown.
-// Entware remains unversioned; its exact bytes are pinned by installer review.
+// Entware offline bundles are installer-derived snapshots with reviewed source pins.
 type Artifact struct {
 	Component Component
 	Arch      RouterArch
@@ -55,22 +55,22 @@ func Resolve(c Component, arch RouterArch) (Artifact, error) {
 	}
 	a := Artifact{Component: c, Arch: arch}
 	if c == Entware {
-		a.Version = "unversioned"
+		a.Version = "offline-2026-11-16"
 		switch arch {
 		case ARM64:
-			a.URL = "https://bin.entware.net/aarch64-k3.10/installer/aarch64-installer.tar.gz"
-			a.Size = 3232671
-			a.Integrity.SHA256 = "64451a3a70ca85aaab3b0677814f6b58f7994793ed6b120eddc36a16639c15d1"
+			a.URL = "bundled://entware/2026-11-16/arm64.tar.gz"
+			a.Size = 23923438
+			a.Integrity.SHA256 = "3fbdd2dddf39e97cafd63fc1a7d9df1ef81edaad423f298518d493cae1163a7d"
 		case MIPSel:
-			a.URL = "https://bin.entware.net/mipselsf-k3.4/installer/mipsel-installer.tar.gz"
-			a.Size = 3304180
-			a.Integrity.SHA256 = "44d94db8b4eb0ccd950552bc71c17ae50777dcac89f8aae949d7140c55e76c9f"
+			a.URL = "bundled://entware/2026-11-16/mipsel.tar.gz"
+			a.Size = 23552819
+			a.Integrity.SHA256 = "fc4eb8bb49fac1fd722f589e63b6189e2296cbe52e6d47e8a8761a5a6f2caf7d"
 		case MIPS:
-			a.URL = "https://bin.entware.net/mipssf-k3.4/installer/mips-installer.tar.gz"
-			a.Size = 3503782
-			a.Integrity.SHA256 = "a8ca977def91f1a12ab4675e20e89a4c05700cb932ef9e41b88e5cb8388f8fe2"
+			a.URL = "bundled://entware/2026-11-16/mips.tar.gz"
+			a.Size = 23854528
+			a.Integrity.SHA256 = "ac5e4a80adb76965bc704ef4e08d20e82556bf9cc87f51af11d183ffd2bc7058"
 		}
-		a.Integrity.Source = "installer-reviewed:2026-11-07:" + a.URL
+		a.Integrity.Source = "installer-offline-bundle:2026-11-16:" + a.URL
 		return a, nil
 	}
 	if c == Watchdog {

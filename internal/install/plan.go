@@ -301,7 +301,7 @@ func BuildPlan(s router.Snapshot, selection Selection, proposal config.ConfigPro
 	if selection.Config.Watchdog {
 		components = append(components, catalog.Watchdog)
 	}
-	p := Plan{ActiveCore: active, Dependencies: []string{"curl", "jq", "ip-full", "iptables", "ipset", "ca-bundle", "coreutils-uname", "coreutils-nohup", "conntrack", "cron"}}
+	p := Plan{Notes: []string{"Зависимости Entware устанавливаются из закреплённого локального набора без сетевых opkg-загрузок"}, ActiveCore: active, Dependencies: []string{"curl", "jq", "ip-full", "iptables", "ipset", "ca-bundle", "coreutils-uname", "coreutils-nohup", "conntrack", "cron"}}
 	if selection.UI {
 		p.Notes = append(p.Notes, fmt.Sprintf("Проверен TCP-порт панели: %d; перед записью проверка будет повторена", d.uiPort))
 	}

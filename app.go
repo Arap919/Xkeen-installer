@@ -313,6 +313,9 @@ func (a *App) StartInstall(id string) error {
 			a.emit(Progress{e.Step, e.Status, "Выполнение этапа: " + e.Step})
 		})
 		result := ResultView{Status: "partial", Message: "Установка завершена частично. Повторите проверку перед новым планом", Backup: report.Backup.Root, Completed: report.Completed, Applied: report.Applied, Uncertain: report.Uncertain, Pending: report.Pending, ReinspectRequired: true}
+		if message := install.PackageFailureMessage(err); message != "" {
+			result.Message = message
+		}
 		if ctx.Err() != nil {
 			result.Status = "cancelled"
 			result.Message = "Установка остановлена. Завершённые записи сохранены; требуется новая проверка"

@@ -27,33 +27,50 @@ def stanza(name, dependencies='', filename=None, payload=b'package'):
 
 class RepositoryTests(unittest.TestCase):
     def test_complete_transitive_closure_is_deterministic(self):
-        records = bundle.parse_index((stanza('app', 'lib (>= 1.0), tool') + stanza('lib', 'runtime') + stanza('runtime') + stanza('tool')).encode(), 'https://bin.entware.net/test')
+        records = bundle.parse_index((stanza('app', 'lib (>= 1.0), tool') + stanza('lib', 'runtime') + stanza('runtime') + stanza('tool')).encode(), 'https://bin.entware.net/aarch64-k3.10')
         self.assertEqual([p['name'] for p in bundle.closure(records, ['app'])], ['app', 'lib', 'runtime', 'tool'])
         self.assertEqual(bundle.closure(records, ['app']), bundle.closure(records, ['app', 'lib']))
 
     def test_virtual_dependency_requires_explicit_matching_provider(self):
         text = stanza('app', 'ca-certs') + stanza('ca-bundle').replace('Depends: ', 'Provides: ca-certs\nDepends: ')
-        records = bundle.parse_index(text.encode(), 'https://bin.entware.net/test')
+        records = bundle.parse_index(text.encode(), 'https://bin.entware.net/aarch64-k3.10')
         with self.assertRaises(ValueError):
             bundle.closure(records, ['app'])
         self.assertEqual([p['name'] for p in bundle.closure(records, ['app'], {'ca-certs': 'ca-bundle'})], ['app', 'ca-bundle'])
         with self.assertRaises(ValueError):
             bundle.closure(records, ['app'], {'ca-certs': 'app'})
 
+    def test_version_constraints_cannot_be_silently_ignored(self):
+        for expression in ('lib (>= 9999)', 'lib (>> 1.0-1)', 'lib (<< 1.0-1)', 'lib (= 2)'):
+            records = bundle.parse_index((stanza('app', expression) + stanza('lib')).encode(), 'https://bin.entware.net/aarch64-k3.10')
+            with self.subTest(expression=expression), self.assertRaises(ValueError):
+                bundle.closure(records, ['lib', 'app'])
+        records = bundle.parse_index((stanza('app', 'ca-certs (>= 1)') + stanza('ca-bundle').replace('Depends: ', 'Provides: ca-certs\nDepends: ')).encode(), 'https://bin.entware.net/aarch64-k3.10')
+        with self.assertRaises(ValueError):
+            bundle.closure(records, ['app'], {'ca-certs': 'ca-bundle'})
+        for left, right, expected in [('1.0~rc1', '1.0', -1), ('1.0-2', '1.0-10', -1), ('1:1.0', '2.0', 1), ('1.01', '1.1', 0)]:
+            self.assertEqual(bundle.compare_versions(left, right), expected)
+
+    def test_lock_binds_architecture_and_feed(self):
+        for origin, architecture in [('https://bin.entware.net/mipssf-k3.4', 'all'), ('https://bin.entware.net/aarch64-k3.10', 'mips-3.4')]:
+            record = bundle.parse_index(stanza('app').replace('Architecture: all', 'Architecture: ' + architecture).encode(), origin)['app']
+            with self.subTest(origin=origin, architecture=architecture), self.assertRaises(ValueError):
+                bundle.validate_lock({'format': 1, 'arch': 'arm64', 'roots': ['app'], 'packages': [record]})
+
     def test_missing_dependency_and_unsupported_alternative_fail_closed(self):
         for depends in ('missing', 'lib | other'):
-            records = bundle.parse_index(stanza('app', depends).encode(), 'https://bin.entware.net/test')
+            records = bundle.parse_index(stanza('app', depends).encode(), 'https://bin.entware.net/aarch64-k3.10')
             with self.assertRaises(ValueError):
                 bundle.closure(records, ['app'])
 
     def test_reject_duplicate_fields_packages_and_unsafe_filenames(self):
         for text in (stanza('app') + stanza('app'), stanza('app').replace('Version:', 'Package: app\nVersion:'), stanza('app', filename='../outside.ipk'), stanza('app', filename='https://evil.invalid/app.ipk'), stanza('app').replace('SHA256sum:', 'MD5Sum:')):
             with self.subTest(text=text), self.assertRaises(ValueError):
-                bundle.parse_index(text.encode(), 'https://bin.entware.net/test')
+                bundle.parse_index(text.encode(), 'https://bin.entware.net/aarch64-k3.10')
 
     def test_unselected_large_package_does_not_block_small_closure(self):
         index = stanza('app') + stanza('large').replace('Size: 7', 'Size: 67108865')
-        records = bundle.parse_index(index.encode(), 'https://bin.entware.net/test')
+        records = bundle.parse_index(index.encode(), 'https://bin.entware.net/aarch64-k3.10')
         self.assertEqual([p['name'] for p in bundle.closure(records, ['app'])], ['app'])
         lock = {'format': 1, 'arch': 'arm64', 'roots': ['large'], 'packages': [records['large']]}
         with self.assertRaises(ValueError):
@@ -61,18 +78,18 @@ class RepositoryTests(unittest.TestCase):
 
     def test_index_stanza_roundtrip_preserves_description_whitespace(self):
         text = stanza('app').rstrip('\n') + '\nDescription: fixture\n continued description \n\n' + stanza('other')
-        record = bundle.parse_index(text.encode(), 'https://bin.entware.net/test')['app']
+        record = bundle.parse_index(text.encode(), 'https://bin.entware.net/aarch64-k3.10')['app']
         bundle.validate_lock({'format': 1, 'arch': 'arm64', 'roots': ['app'], 'packages': [record]})
 
     def test_package_tampering_and_truncation_rejected(self):
-        record = bundle.parse_index(stanza('app').encode(), 'https://bin.entware.net/test')['app']
+        record = bundle.parse_index(stanza('app').encode(), 'https://bin.entware.net/aarch64-k3.10')['app']
         bundle.verify(record, b'package')
         for data in (b'packagf', b'packag', b'package!'):
             with self.assertRaises(ValueError):
                 bundle.verify(record, data)
 
     def test_lock_rejects_changed_metadata_missing_roots_and_foreign_urls(self):
-        record = bundle.parse_index(stanza('app').encode(), 'https://bin.entware.net/test')['app']
+        record = bundle.parse_index(stanza('app').encode(), 'https://bin.entware.net/aarch64-k3.10')['app']
         good = {'format': 1, 'arch': 'arm64', 'roots': ['app'], 'packages': [record]}
         bundle.validate_lock(good)
         for change in ({'roots': ['missing']}, {'packages': [dict(record, url='http://bin.entware.net/app.ipk')]}, {'packages': [dict(record, sha256='bad')]}, {'packages': [record, record]}, {'arch': 'other'}):
@@ -90,7 +107,7 @@ class BundleTests(unittest.TestCase):
                 entry.size = len(data)
                 archive.addfile(entry, io.BytesIO(data))
         base = stream.getvalue()
-        record = bundle.parse_index(stanza('app').encode(), 'https://bin.entware.net/test')['app']
+        record = bundle.parse_index(stanza('app').encode(), 'https://bin.entware.net/aarch64-k3.10')['app']
         lock = {'format': 1, 'arch': 'arm64', 'roots': ['app'], 'packages': [record]}
         return base, lock
 
@@ -113,6 +130,29 @@ class BundleTests(unittest.TestCase):
                     bundle.build_archive(base, lock, data)
             with self.assertRaises(ValueError):
                 bundle.build_archive(base + b'tamper', lock, {'app.ipk': b'package'})
+
+    def test_locales_hook_has_no_network_fallback_and_is_review_pinned(self):
+        hook = b"#!/bin/sh\nif ! [ -f '/opt/usr/lib/locale/locale-archive' ]; then\n\techo 'locale-archive file was not created, not enough memory? Downloading...'\n\twget http://bin.entware.net/other/locale-archive.2.27 -O /opt/usr/lib/locale/locale-archive\nfi\nexit 0\n"
+        def archive(files):
+            stream = io.BytesIO()
+            with tarfile.open(fileobj=stream, mode='w:gz') as output:
+                for name, data in files.items():
+                    entry = tarfile.TarInfo(name); entry.size = len(data); entry.mode = 0o755
+                    output.addfile(entry, io.BytesIO(data))
+            return stream.getvalue()
+        control = archive({'./postinst': hook, './control': b'Package: locales\nVersion: 2.27-9\n'})
+        original = archive({'./debian-binary': b'2.0\n', './control.tar.gz': control, './data.tar.gz': b'unmodified payload fixture'})
+        with patch.dict(bundle.LOCALE_HOOKS, {'arm64': hashlib.sha256(hook).hexdigest()}):
+            first = bundle.patch_locale_package(original, 'arm64')
+            self.assertEqual(first, bundle.patch_locale_package(original, 'arm64'))
+            with tarfile.open(fileobj=io.BytesIO(first)) as output:
+                self.assertEqual(output.extractfile('./data.tar.gz').read(), b'unmodified payload fixture')
+                with tarfile.open(fileobj=io.BytesIO(output.extractfile('./control.tar.gz').read())) as controls:
+                    patched = controls.extractfile('./postinst').read()
+                    self.assertNotIn(b'wget ', patched)
+                    self.assertIn(b'exit 1', patched)
+            with patch.dict(bundle.LOCALE_HOOKS, {'arm64': '0' * 64}), self.assertRaises(ValueError):
+                bundle.patch_locale_package(original, 'arm64')
 
     def test_bad_download_does_not_publish_partial_repository(self):
         _, lock = self.fixture()
@@ -166,6 +206,46 @@ class DownloadTests(unittest.TestCase):
                 server.shutdown()
                 server.server_close()
                 thread.join(timeout=2)
+
+    def test_real_tls_redirect_never_contacts_http_target(self):
+        if shutil.which('openssl') is None:
+            self.skipTest('openssl is required for the isolated TLS fixture')
+        hits = []
+        class Target(http.server.BaseHTTPRequestHandler):
+            def do_GET(self):
+                hits.append(self.path)
+                self.send_response(200); self.end_headers()
+            def log_message(self, *args):
+                pass
+        with tempfile.TemporaryDirectory() as directory:
+            key = str(pathlib.Path(directory) / 'fixture.key')
+            cert = str(pathlib.Path(directory) / 'fixture.crt')
+            subprocess.run(['openssl', 'req', '-x509', '-newkey', 'rsa:2048', '-nodes', '-keyout', key, '-out', cert, '-days', '1', '-subj', '/CN=localhost', '-addext', 'subjectAltName=IP:127.0.0.1'], check=True, capture_output=True)
+            target = http.server.HTTPServer(('127.0.0.1', 0), Target)
+            class Redirect(Target):
+                def do_GET(self):
+                    self.send_response(302)
+                    self.send_header('Location', 'http://127.0.0.1:' + str(target.server_port) + '/must-not-fetch')
+                    self.end_headers()
+            context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER); context.load_cert_chain(cert, key)
+            server = http.server.HTTPServer(('127.0.0.1', 0), Redirect)
+            server.socket = context.wrap_socket(server.socket, server_side=True)
+            threads = [threading.Thread(target=value.serve_forever, daemon=True) for value in (server, target)]
+            for thread in threads:
+                thread.start()
+            original = bundle.secure_url
+            initial = 'https://127.0.0.1:' + str(server.server_port) + '/fixture'
+            trusted = ssl.create_default_context(cafile=cert)
+            try:
+                with patch.object(bundle, 'secure_url', side_effect=lambda value: value if value == initial else original(value)), patch.object(bundle.ssl, 'create_default_context', return_value=trusted):
+                    with self.assertRaises(ValueError):
+                        bundle.fetch(initial, 100)
+                self.assertEqual(hits, [])
+            finally:
+                for value in (server, target):
+                    value.shutdown(); value.server_close()
+                for thread in threads:
+                    thread.join(timeout=2)
 
     def test_untrusted_certificate_has_no_fallback(self):
         with patch.object(bundle.urllib.request, 'build_opener') as factory:

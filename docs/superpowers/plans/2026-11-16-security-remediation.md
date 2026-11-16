@@ -59,18 +59,18 @@ P1 means address or explicitly resolve before broad distribution. P2 means a con
 
 ### SEC-001: Authenticate all Entware package downloads
 
-**Status:** In progress; offline delivery design approved; implementation and isolated verification pending
+**Status:** Implemented and independently reviewed; final desktop CI pending
 **Priority:** P1
 **Evidence:** `internal/bootstrap/archives/{arm64,mips,mipsel}.tar.gz`, members `etc/opkg.conf` and ARM64 `bin/install`; `internal/install/runner.go`, dependency stage; `internal/catalog/catalog.go`.
 **Attack prerequisites:** An attacker can alter the router's HTTP download traffic or responses. Unauthenticated package metadata can defeat checksums delivered through the same channel.
 **Impact:** Potential root code execution on the router through substituted packages/install hooks, followed by attacks on the home network. Desktop execution was not demonstrated.
 
-- [ ] Trace every initial-bootstrap and later opkg fetch, including transitive dependencies and repository metadata; document its authentication mechanism.
-- [ ] Select and implement authenticated bootstrap delivery that works before CA/TLS packages are installed. Merely changing the post-bootstrap feed URLs is insufficient.
-- [ ] Enforce certificate validation and/or independently trusted package signatures/digests for executable package content. Reject insecure feeds used by existing Entware installations before invoking opkg, with actionable Russian guidance.
-- [ ] If bundled bytes change, update archive size/digest pins and `docs/entware-byte-pins.md`; preserve archive safety validation.
-- [ ] Test tampered metadata/package bytes, HTTP downgrade, untrusted certificates, and missing trust material. Each must stop before executing untrusted package hooks; no insecure fallback.
-- [ ] Validate an isolated clean installation and an existing installation for ARM64, MIPS, and MIPSel.
+- [x] Trace every initial-bootstrap and later opkg fetch, including transitive dependencies and repository metadata; document its authentication mechanism.
+- [x] Select and implement authenticated bootstrap delivery that works before CA/TLS packages are installed. Merely changing the post-bootstrap feed URLs is insufficient.
+- [x] Enforce certificate validation and/or independently trusted package signatures/digests for executable package content. Reject insecure feeds used by existing Entware installations before invoking opkg, with actionable Russian guidance.
+- [x] If bundled bytes change, update archive size/digest pins and `docs/entware-byte-pins.md`; preserve archive safety validation.
+- [x] Test tampered metadata/package bytes, HTTP downgrade, untrusted certificates, and missing trust material. Each must stop before executing untrusted package hooks; no insecure fallback.
+- [x] Validate an isolated clean installation and an existing installation for ARM64, MIPS, and MIPSel.
 
 **Acceptance:** Every executable package download has an authenticated trust path, including the earliest bootstrap fetch. Negative fixtures fail closed. Reviewed catalog bytes remain reproducible.
 **Likely files:** `internal/bootstrap/archive.go`, bundled archives, `internal/catalog/catalog.go`, `internal/install/runner.go`, corresponding bootstrap/install tests, `docs/entware-byte-pins.md`.
@@ -236,3 +236,17 @@ Approved by the user: offline reviewed package closure, as proposed above. Work 
 - [ ] Run Go/frontend checks and isolated clean/existing opkg tests on ARM64/MIPS/MIPSel with network denied. Obtain independent security review, fix findings, record remaining evidence honestly, then close SEC-001 only if its acceptance is met.
 
 Environment observations: HTTPS requests to bin.entware.net timed out during TLS negotiation on this host; Docker client exists but its daemon socket is unavailable. These are verification blockers, not permission to use HTTP or disable certificate checks.
+
+## SEC-001 execution record (2026-11-16)
+
+- User approved offline delivery design and sequential implementation/security review. Implemented in the existing checkout; no worktree, real-router mutation, trust-store import or release publication.
+- Acquisition: CI run 43849821304 fetched official package metadata and IPKs with validated HTTPS; current locks contain ARM64 78, MIPS 79 and MIPSel 79 packages. IPK hashes/sizes and complete version-constrained dependency closure verified; ca-certs provider is explicitly ca-bundle. Final derived catalog version is offline-2026-11-16, with bundled:// origins. Exact source/final provenance and reproduction are in docs/entware-byte-pins.md.
+- Bootstrap: all package metadata/IPKs are local. Explicit opkg config, env -i, fixed PATH and OPKG_CONF_DIR prevent extra feeds. Whole-archive SHA256, archive/path/symlink/ELF safety checks and individual IPK/index checks remain fail-closed. SMB readback bound increased from 16 to 64 MiB for the approximately 23 MiB archives; decompression/member limits unchanged.
+- Existing installs: reject HTTP, disabled certificate checks, unsupported quoted config, extra unknown functions.sh callbacks, incomplete status, and version changes with old unknown hooks before writes. Exact dependency closure is staged/read back over SSH with private config/lists; both dependencies and watchdog use it. State rechecked before installs. No user feed/config rewrite or automatic package repair.
+- Independent review returned and resolved: version constraints ignored; cross-architecture/feed locks accepted; locales HTTP fallback; unrelated unpacked hooks/old upgrade callbacks; quoted directive parsing. Each reproduced with negative tests before its fix. Final reviewer recommends closure for the reviewed scope. A final UI-path check also found generic error hiding; four allowlisted static package-policy errors now reach the UI without wrapped/unknown private error text; app regression passed and reviewer approved this fix.
+- locales transformation: exact original hook digests pinned; only HTTP fallback replaced by Russian error/exit 1. data.tar.gz and other control members unchanged. Source and derived package hashes recorded separately. Independent reviewer reproduced all final archives byte-for-byte and verified their catalog pins.
+- Checks: full Go suite (eight packages), production vet, frontend typecheck/58 tests/build, Python 20 security tests including real untrusted TLS and HTTPS-to-HTTP redirect with zero HTTP-target requests, remote package readback tampering, and git diff --check passed.
+- Isolated execution: real bin/install and full dependency installation succeeded on ARM64, MIPS, MIPSel with network disabled. Final TestNativeOfflinePackagePhase passed ARM64 2.58s, MIPS 31.50s, MIPSel 36.34s, including the pinned watchdog IPK, hostile env/additional configs/stale lists, blocked unfinished/old hooks, harmless reproduction of the previous unrelated-postinst path, and forced locales generation failure. proot 5.5.0/QEMU used only in Docker; older broken proot excluded from evidence.
+- Evidence limits: isolated Linux userspace only; real Keenetic hardware, firmware extraction/RCI and SSH credential handoff were not validated. Existing compromise or concurrent root-level package administration is not attested by these checks. SEC-007 remains separate; no distribution approval is implied.
+- Ruling: existing read-only discovery with opkg list-installed is retained; the new gates precede package update/install and hook execution. That query does not fetch packages or configure pending hooks.
+- Final status: security review accepted; waiting for final native desktop CI after commit. Implementation commit/run will be recorded after those actions.

@@ -8,6 +8,9 @@ import (
 	"fmt"
 	"io/fs"
 	"path"
+	"sort"
+
+	"github.com/Arap919/xkeen-installer/internal/bootstrap"
 	"strings"
 	"time"
 
@@ -121,6 +124,25 @@ func run(ctx context.Context, p Plan, t router.Transport, emit func(Event), load
 	if fp != d.fingerprint {
 		return r, ErrStale
 	}
+	if err = inspectPackageFeeds(ctx, t); err != nil {
+		return r, err
+	}
+	repository, repoErr := bootstrap.OfflineRepository(ctx, fresh.Arch)
+	if repoErr != nil {
+		return r, errors.New("Проверенный локальный набор Entware недоступен; установка остановлена без сетевой загрузки")
+	}
+	packageTargets, targetErr := repository.DependencyVersions(p.Dependencies)
+	if targetErr != nil {
+		return r, errors.New("Проверенный набор зависимостей Entware неполон")
+	}
+	for _, artifact := range d.artifacts {
+		if artifact.Component == catalog.Watchdog {
+			packageTargets["router-watchdog"] = artifact.Version
+		}
+	}
+	if err = inspectPackageState(ctx, t, packageTargets); err != nil {
+		return r, err
+	}
 	if d.selection.UI {
 		_, existing := fresh.Config("/opt/etc/init.d/S99xkeen-ui")
 		if err = fresh.CheckUIPort(d.uiPort, existing); err != nil {
@@ -148,6 +170,9 @@ func run(ctx context.Context, p Plan, t router.Transport, emit func(Event), load
 		}
 	}
 	var need uint64 = 32 << 20
+	for _, data := range repository.Files {
+		need += uint64(len(data)) * 2
+	}
 	for _, f := range files {
 		need += uint64(len(f.data)) * 2
 	}
@@ -168,10 +193,17 @@ func run(ctx context.Context, p Plan, t router.Transport, emit func(Event), load
 	// No package, installed-file or service mutation is allowed above this point.
 	begin("dependencies")
 	mutating = true
-	if _, err = command(ctx, t, "/opt/bin/opkg update"); err != nil {
+	opkg, stageErr := stageOfflineRepository(ctx, t, p.ID, repository)
+	if stageErr != nil {
 		return fail()
 	}
-	args := "/opt/bin/opkg install"
+	if _, err = command(ctx, t, opkg+" update"); err != nil {
+		return fail()
+	}
+	if err = inspectPackageState(ctx, t, packageTargets); err != nil {
+		return fail()
+	}
+	args := opkg + " install"
 	for _, name := range p.Dependencies {
 		args += " " + quote(name)
 	}
@@ -372,7 +404,10 @@ func run(ctx context.Context, p Plan, t router.Transport, emit func(Event), load
 				if err = write(f); err != nil {
 					return fail()
 				}
-				if _, err = command(ctx, t, "/opt/bin/opkg install "+quote(f.path)); err != nil {
+				if err = inspectPackageState(ctx, t, packageTargets); err != nil {
+					return fail()
+				}
+				if _, err = command(ctx, t, opkg+" install "+quote(f.path)); err != nil {
 					return fail()
 				}
 			}
@@ -586,3 +621,28 @@ func serviceLaunch(fixedCommand string) string { return fixedCommand + " </dev/n
 // Entware's cron package uses /opt/sbin/cron, not BusyBox crond.
 const cronPreflightCommand = `for name in cron crond; do for pid in $(pidof "$name" 2>/dev/null); do exe=$(readlink "/proc/$pid/exe") || exit 1; [ "$name" = cron ] && [ "$exe" = /opt/sbin/cron ] || exit 1; done; done`
 const cronVerifyCommand = `test -x /opt/etc/init.d/S10cron && test -x /opt/sbin/cron || exit 1; count=0; for pid in $(pidof cron 2>/dev/null); do [ "$(readlink "/proc/$pid/exe")" = /opt/sbin/cron ] || exit 1; count=$((count+1)); done; [ "$count" -gt 0 ] || exit 1; for pid in $(pidof crond 2>/dev/null); do exit 1; done`
+
+// stageOfflineRepository writes and reads back every reviewed local package before
+// opkg can see its index. No caller-controlled configuration or lists are used.
+func stageOfflineRepository(ctx context.Context, t router.Transport, id string, repo bootstrap.OfflineRepo) (string, error) {
+	root := "/opt/.xkeen-installer-stage/" + id + "/entware"
+	names := make([]string, 0, len(repo.Files))
+	for name := range repo.Files {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	for _, name := range names {
+		if path.Base(name) != name || strings.ContainsAny(name, "\\\x00\r\n") {
+			return "", errors.New("unsafe repository member")
+		}
+		if err := writeChecked(ctx, t, payload{path: root + "/" + name, data: repo.Files[name], mode: 0600}); err != nil {
+			return "", err
+		}
+	}
+	config := strings.ReplaceAll(string(repo.Config), bootstrap.OfflineRoot, root)
+	config = strings.ReplaceAll(config, "/opt/var/opkg-lists-offline", root+"/lists")
+	if err := writeChecked(ctx, t, payload{path: root + "/opkg.conf", data: []byte(config), mode: 0600}); err != nil {
+		return "", err
+	}
+	return "/opt/bin/env -i PATH=/opt/bin:/opt/sbin:/usr/bin:/usr/sbin:/bin:/sbin OPKG_CONF_DIR=" + quote(root) + " /opt/bin/opkg --conf " + quote(root+"/opkg.conf"), nil
+}

@@ -108,7 +108,7 @@ func (s *Session) Prepare(ctx context.Context, uuid string) (Plan, error) {
 }
 
 // KeeneticOS documents native processing of *.tgz. This changes only the
-// destination filename; official HTTPS .tar.gz bytes and their digest stay intact.
+// destination filename; reviewed offline bundle bytes and their digest stay intact.
 func archiveName(arch catalog.RouterArch) string {
 	if arch == catalog.ARM64 {
 		return "aarch64-installer.tgz"

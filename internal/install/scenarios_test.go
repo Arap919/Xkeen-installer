@@ -17,7 +17,7 @@ func TestFixtureCleanEntwareCoreMatrix(t *testing.T) {
 	for _, core := range []catalog.Component{catalog.Xray, catalog.Mihomo} {
 		t.Run(string(core), func(t *testing.T) {
 			f := fixture()
-			f.files = map[string][]byte{"/opt/bin/opkg": []byte("opkg")}
+			f.files = map[string][]byte{"/opt/lib/opkg/status": []byte("Package: opkg\nVersion: 1\nStatus: install user installed\n\n"), "/opt/etc/opkg.conf": []byte("src/gz entware https://bin.entware.net/aarch64-k3.10\n"), "/opt/bin/opkg": []byte("opkg")}
 			f.active = ""
 			s, err := router.Inspect(context.Background(), f)
 			if err != nil || !s.Entware {
@@ -180,7 +180,7 @@ func TestFixtureManualEntwareAndNoSpaceGates(t *testing.T) {
 				t.Fatal("gate allowed writes")
 			}
 			for _, command := range f.commands {
-				if strings.Contains(command, "opkg install") || strings.Contains(command, "S05xkeen stop") || strings.Contains(command, "start on") {
+				if (strings.Contains(command, "/opt/bin/opkg") && strings.Contains(command, " install ")) || strings.Contains(command, "S05xkeen stop") || strings.Contains(command, "start on") {
 					t.Fatal("gate allowed package or service mutation", command)
 				}
 			}

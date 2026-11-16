@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"path/filepath"
 	"strings"
 	"sync/atomic"
@@ -298,5 +299,41 @@ func TestVerifiedPanelReadyRequiresAllChecks(t *testing.T) {
 	s.Component = catalog.Mihomo
 	if verifiedPanelReady(s) {
 		t.Fatal("non-UI accepted")
+	}
+}
+
+func TestPackagePolicyFailureReachesUIWithoutPrivateErrorDetails(t *testing.T) {
+	for _, tc := range []struct {
+		err      error
+		expected string
+	}{
+		{fmt.Errorf("private-secret: %w", install.ErrInsecureFeeds), "/opt/etc/opkg.conf"},
+		{errors.New("private-secret password=hidden"), "частично"},
+	} {
+		a := testApp()
+		finished := make(chan struct{})
+		a.emit = func(progress Progress) {
+			if progress.Step == "finished" {
+				close(finished)
+			}
+		}
+		a.run = func(context.Context, install.Plan, router.Transport, func(install.Event)) (install.Report, error) {
+			return install.Report{ReinspectRequired: true}, tc.err
+		}
+		if err := a.ConfirmPlan("plan"); err != nil {
+			t.Fatal(err)
+		}
+		if err := a.StartInstall("plan"); err != nil {
+			t.Fatal(err)
+		}
+		select {
+		case <-finished:
+		case <-time.After(time.Second):
+			t.Fatal("result missing")
+		}
+		message := a.GetResult().Message
+		if !strings.Contains(message, tc.expected) || strings.Contains(message, "private-secret") || strings.Contains(message, "password=") {
+			t.Fatal("actionable message lost or private error leaked", message)
+		}
 	}
 }

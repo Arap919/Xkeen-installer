@@ -31,7 +31,7 @@ BASE_PINS = {
 }
 NAME = re.compile(r'[a-zA-Z0-9][a-zA-Z0-9+_.-]*\Z')
 FILENAME = re.compile(r'[a-zA-Z0-9][a-zA-Z0-9+_.~-]*\.ipk\Z')
-DEPENDENCY = re.compile(r'([a-zA-Z0-9][a-zA-Z0-9+_.-]*)(?:\s+\((?:>=|<=|=|>>|<<|>|<)\s+[^()\s]+\))?\Z')
+DEPENDENCY = re.compile(r'([a-zA-Z0-9][a-zA-Z0-9+_.-]*)(?:\s+\((>=|<=|=|>>|<<|>|<)\s+([^()\s]+)\))?\Z')
 
 
 def secure_url(url):
@@ -106,27 +106,85 @@ def parse_index(data, origin):
     return records
 
 
+def compare_versions(left, right):
+    # Match opkg's epoch/upstream/revision ordering, including its tilde rule.
+    # Reference: openwrt/opkg-lede libopkg/pkg.c, pkg_compare_versions.
+    def split(value):
+        if not re.fullmatch(r'[A-Za-z0-9.+:~_-]+', value):
+            raise ValueError('Unsupported package version')
+        epoch = 0
+        if ':' in value:
+            prefix, value = value.split(':', 1)
+            if not prefix.isdigit() or int(prefix) > 0xffffffff:
+                raise ValueError('Invalid package epoch')
+            epoch = int(prefix)
+        upstream, separator, revision = value.rpartition('-')
+        return epoch, upstream if separator else value, revision if separator else ''
+
+    def compare_part(left, right):
+        def order(character):
+            if character == '~':
+                return -1
+            if not character or character.isdigit():
+                return 0
+            return ord(character) if character.isalpha() else ord(character) + 256
+        while left or right:
+            while (left and not left[0].isdigit()) or (right and not right[0].isdigit()):
+                first = order(left[:1])
+                second = order(right[:1])
+                if first != second:
+                    return (first > second) - (first < second)
+                left, right = left[1:], right[1:]
+            left, right = left.lstrip('0'), right.lstrip('0')
+            first = re.match(r'[0-9]*', left).group()
+            second = re.match(r'[0-9]*', right).group()
+            if len(first) != len(second):
+                return (len(first) > len(second)) - (len(first) < len(second))
+            if first != second:
+                return (first > second) - (first < second)
+            left, right = left[len(first):], right[len(second):]
+        return 0
+
+    first, second = split(left), split(right)
+    if first[0] != second[0]:
+        return (first[0] > second[0]) - (first[0] < second[0])
+    return compare_part(first[1], second[1]) or compare_part(first[2], second[2])
+
+
 def closure(records, roots, providers=None):
     selected = {}
     providers = providers or {}
 
-    def visit(name):
-        if name in selected:
-            return
+    def visit(name, operator=None, expected=None):
+        actual = None
         if name not in records:
             provider = providers.get(name)
             if provider not in records:
                 raise ValueError('Missing dependency: ' + name)
-            supplied = []
+            supplied = None
             for expression in records[provider]['provides'].split(','):
                 match = DEPENDENCY.fullmatch(expression.strip())
-                if match:
-                    supplied.append(match.group(1))
-            if name not in supplied:
+                if match and match.group(1) == name:
+                    supplied = match
+                    break
+            if supplied is None:
                 raise ValueError('Selected provider does not provide ' + name)
+            if operator:
+                if supplied.group(2) != '=':
+                    raise ValueError('Versioned dependency requires a versioned Provides: ' + name)
+                actual = supplied.group(3)
             name = provider
-            if name in selected:
-                return
+        else:
+            actual = records[name]['version']
+        if operator:
+            comparison = compare_versions(actual, expected)
+            satisfied = {'>=': comparison >= 0, '>': comparison >= 0,
+                         '<=': comparison <= 0, '<': comparison <= 0,
+                         '>>': comparison > 0, '<<': comparison < 0, '=': comparison == 0}
+            if not satisfied[operator]:
+                raise ValueError('Unsatisfied version constraint: ' + name)
+        if name in selected:
+            return
         record = records[name]
         selected[name] = record
         for dependency in record['depends'].split(','):
@@ -135,7 +193,7 @@ def closure(records, roots, providers=None):
             match = DEPENDENCY.fullmatch(dependency.strip())
             if not match:
                 raise ValueError('Unsupported dependency expression: ' + dependency)
-            visit(match.group(1))
+            visit(*match.groups())
 
     for name in roots:
         visit(name)
@@ -158,6 +216,10 @@ def validate_lock(lock):
             raise ValueError('Duplicate or oversized locked package')
         filenames.add(record['filename'])
         origin = record['url'].rsplit('/', 1)[0]
+        base = 'https://bin.entware.net/' + FEEDS[lock['arch']]
+        target_arch = {'arm64': 'aarch64-3.10', 'mips': 'mips-3.4', 'mipsel': 'mipsel-3.4'}[lock['arch']]
+        if origin not in (base, base + '/keenetic') or record['architecture'] not in ('all', target_arch, target_arch + '_kn'):
+            raise ValueError('Package feed/architecture differs from the reviewed target')
         parsed = parse_index(record['stanza'].encode(), origin)
         if list(parsed.values()) != [record]:
             raise ValueError('Locked metadata does not match its package stanza')
@@ -203,6 +265,59 @@ def download_repository(lock, output):
     (output / 'reviewed-lock.json').write_text(json.dumps(lock, indent=2) + '\n', encoding='utf-8')
 
 
+LOCALE_HOOKS = {
+    'arm64': 'cb04a9323a9995fc0dd79ae73aa7e3a711167131f8caae88eb7a948b1f80d361',
+    'mipsel': 'cb04a9323a9995fc0dd79ae73aa7e3a711167131f8caae88eb7a948b1f80d361',
+    'mips': '658ed52ae794cea7ed6257b4a6aac5a3dfd7b7e863a4807bab81d5136591d775',
+}
+
+
+def pack_tar(members):
+    stream = io.BytesIO()
+    with gzip.GzipFile(fileobj=stream, mode='wb', filename='', mtime=0, compresslevel=9) as compressed:
+        with tarfile.open(fileobj=compressed, mode='w', format=tarfile.GNU_FORMAT) as output:
+            for original, data in members:
+                entry = copy.copy(original)
+                entry.uid = entry.gid = entry.mtime = 0
+                entry.uname = entry.gname = ''
+                entry.pax_headers = {}
+                if data is not None:
+                    entry.size = len(data)
+                output.addfile(entry, io.BytesIO(data) if data is not None else None)
+    return stream.getvalue()
+
+
+def read_tar(data):
+    with tarfile.open(fileobj=io.BytesIO(data), mode='r:gz') as archive:
+        return [(copy.copy(entry), archive.extractfile(entry).read() if entry.isfile() else None) for entry in archive]
+
+
+def patch_locale_package(data, arch):
+    members = read_tar(data)
+    patched = False
+    for entry, content in members:
+        if entry.name.lstrip('./') != 'control.tar.gz':
+            continue
+        controls = read_tar(content)
+        for control, script in controls:
+            if control.name.lstrip('./') != 'postinst':
+                continue
+            if hashlib.sha256(script).hexdigest() != LOCALE_HOOKS[arch]:
+                raise ValueError('Unknown locales hook; independent review required')
+            suffix = '.be' if arch == 'mips' else ''
+            fallback = ("\techo 'locale-archive file was not created, not enough memory? Downloading...'\n"
+                        '\twget http://bin.entware.net/other/locale-archive.2.27' + suffix + ' -O /opt/usr/lib/locale/locale-archive\n').encode()
+            if script.count(fallback) != 1:
+                raise ValueError('Unexpected locales fallback; review required')
+            replacement = "\techo 'Локальный архив локалей отсутствует; установка остановлена без сетевой загрузки.' >&2\n\texit 1\n".encode()
+            controls[controls.index((control, script))] = (control, script.replace(fallback, replacement))
+            patched = True
+        members[members.index((entry, content))] = (entry, pack_tar(controls))
+    if not patched:
+        raise ValueError('Missing reviewed locales hook')
+    return pack_tar(members)
+
+
 def build_archive(base, lock, packages):
     validate_lock(lock)
     arch = lock['arch']
@@ -214,6 +329,27 @@ def build_archive(base, lock, packages):
         raise ValueError('Missing or unexpected offline package bytes')
     for record in lock['packages']:
         verify(record, packages[record['filename']])
+    # Format 1 is upstream acquisition input; format 2 is the final local repository.
+    # Record the exact source bytes before deriving the single reviewed hook fix.
+    source_lock = (json.dumps(lock, indent=2) + '\n').encode()
+    lock = copy.deepcopy(lock)
+    packages = dict(packages)
+    lock['format'] = 2
+    for record in lock['packages']:
+        if record['name'] != 'locales':
+            continue
+        original_size, original_digest = record['size'], record['sha256']
+        patched = patch_locale_package(packages[record['filename']], arch)
+        record['source_url'] = record['url']
+        record['source_sha256'] = original_digest
+        record['source_size'] = original_size
+        record['url'] = 'bundled://entware/' + arch + '/' + record['filename']
+        record['size'] = len(patched)
+        record['sha256'] = hashlib.sha256(patched).hexdigest()
+        record['transformation'] = 'locales-no-network-fallback-v1'
+        record['stanza'] = re.sub(r'(?m)^Size: .*$', 'Size: ' + str(record['size']), record['stanza'])
+        record['stanza'] = re.sub(r'(?m)^SHA256sum: .*$', 'SHA256sum: ' + record['sha256'], record['stanza'])
+        packages[record['filename']] = patched
     config = ('src xkeen file:///opt/.xkeen-installer-repository\n'
               'dest root /\nlists_dir ext /opt/var/opkg-lists-offline\n')
     # Preserve all original architecture priorities, with no network sources.
@@ -253,14 +389,21 @@ def build_archive(base, lock, packages):
     if not replaced or 'etc/opkg.conf' not in seen:
         raise ValueError('Missing original bootstrap entrypoint or configuration')
     additional = {'etc/opkg-offline.conf': config.encode(),
+                  'etc/xkeen-offline-source-lock.json': source_lock,
                   '.xkeen-installer-repository/Packages': ''.join(p['stanza'] for p in lock['packages']).encode(),
                   '.xkeen-installer-repository/reviewed-lock.json': (json.dumps(lock, indent=2) + '\n').encode()}
     additional.update({'.xkeen-installer-repository/' + name: data for name, data in packages.items()})
+    if len(rewritten) + len(additional) + 1 > 1000 or sum(entry.size for entry, _ in rewritten) + sum(map(len, additional.values())) > 120 << 20:
+        raise ValueError('Offline archive exceeds the runtime archive validation limits')
     stream = io.BytesIO()
-    with gzip.GzipFile(fileobj=stream, mode='wb', filename='', mtime=0) as compressed:
+    with gzip.GzipFile(fileobj=stream, mode='wb', filename='', mtime=0, compresslevel=9) as compressed:
         with tarfile.open(fileobj=compressed, mode='w', format=tarfile.GNU_FORMAT) as output:
             for entry, data in rewritten:
                 output.addfile(entry, io.BytesIO(data) if data is not None else None)
+            directory = tarfile.TarInfo('.xkeen-installer-repository')
+            directory.type = tarfile.DIRTYPE
+            directory.mode = 0o700
+            output.addfile(directory)
             for name, data in sorted(additional.items()):
                 if name in seen:
                     raise ValueError('Offline archive member collides with original')
