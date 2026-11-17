@@ -8,6 +8,7 @@ replace github.com/cloudsoda/go-smb2 => ./third_party/go-smb2
 require (
 	github.com/cloudsoda/go-smb2 v0.0.0-20260609183447-7b96c35f5f4b
 	github.com/pkg/sftp v1.13.9
+	github.com/sergeymakinen/go-crypt v1.0.6
 	github.com/wailsapp/wails/v2 v2.17.1
 	golang.org/x/crypto v0.59.0
 	golang.org/x/sys v0.50.0

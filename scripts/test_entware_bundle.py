@@ -99,7 +99,7 @@ class RepositoryTests(unittest.TestCase):
 
 class BundleTests(unittest.TestCase):
     def fixture(self):
-        install = b'if ! opkg update >/dev/null 2>&1\nfor ipk in libgcc libc; do\nif ! opkg install $ipk >/dev/null 2>&1\n'
+        install = b'if ! opkg update >/dev/null 2>&1\nfor ipk in libgcc libc; do\nif ! opkg install $ipk >/dev/null 2>&1\n# keygen\nlegacy-keygen\nlogger -t installer \'[4/5] configure\'\n/opt/etc/init.d/S51dropbear start\nif grep -q "222" /config; then\necho old\nfi\n'
         stream = io.BytesIO()
         with tarfile.open(fileobj=stream, mode='w:gz') as archive:
             for name, data in [('bin/install', install), ('etc/opkg.conf', b'src/gz entware http://bin.entware.net/test\n')]:
@@ -271,6 +271,80 @@ class DownloadTests(unittest.TestCase):
                 factory.return_value.open.return_value = response
                 with self.assertRaises(ValueError):
                     bundle.fetch('https://bin.entware.net/app.ipk', 4)
+
+
+
+class FirstAccessTests(unittest.TestCase):
+    def test_fresh_account_never_installs_a_reusable_root_password(self):
+        with tarfile.open('internal/bootstrap/archives/arm64.tar.gz') as archive:
+            name = next(n for n in archive.getnames() if '/opt-ndmsv2_' in n and n.endswith('.ipk'))
+            original = archive.extractfile(name).read()
+        with tarfile.open(fileobj=io.BytesIO(original)) as ipk:
+            part = next(n for n in ipk.getnames() if n.endswith('data.tar.gz'))
+            with tarfile.open(fileobj=io.BytesIO(ipk.extractfile(part).read())) as data:
+                passwd = data.extractfile('./opt/etc/passwd').read()
+        if not passwd.startswith(b'root:!:'):
+            original = bundle.patch_account_package(original)
+        with tarfile.open(fileobj=io.BytesIO(original)) as ipk:
+            part = next(n for n in ipk.getnames() if n.endswith('data.tar.gz'))
+            with tarfile.open(fileobj=io.BytesIO(ipk.extractfile(part).read())) as data:
+                passwd = data.extractfile('./opt/etc/passwd').read()
+        self.assertTrue(passwd.startswith(b'root:!:0:0:'), 'fresh account must remain locked until selected hash is installed')
+
+    def test_revoke_stops_prior_service_before_package_pass(self):
+        with tempfile.TemporaryDirectory() as root:
+            opt = pathlib.Path(root) / 'opt'
+            (opt / 'etc/xkeen-bootstrap').mkdir(parents=True)
+            (opt / 'etc/init.d').mkdir()
+            (opt / 'etc/xkeen-bootstrap/ready').write_text('old-ready')
+            marker = pathlib.Path(root) / 'stopped'
+            init = opt / 'etc/init.d/S51dropbear'
+            init.write_text('#!/bin/sh\n[ "$1" = stop ] || exit 1\ntouch ' + str(marker) + '\n')
+            init.chmod(0o700)
+            script = pathlib.Path('scripts/entware-first-access.sh').read_text().replace('/opt/', str(opt) + '/')
+            result = subprocess.run(['/bin/sh', '-c', script, 'fixture', 'revoke'], capture_output=True)
+            self.assertEqual(result.returncode, 0)
+            self.assertTrue(marker.exists(), 'running SSH could survive account-package overwrite')
+            self.assertFalse((opt / 'etc/xkeen-bootstrap/ready').exists())
+
+    def test_modified_dropbear_is_fail_closed_without_ready(self):
+        source = pathlib.Path('internal/bootstrap/archives/arm64.tar.gz').read_bytes()
+        with tarfile.open(fileobj=io.BytesIO(source)) as archive:
+            name = next(n for n in archive.getnames() if '/dropbear_' in n and n.endswith('.ipk'))
+            original = archive.extractfile(name).read()
+        # A generated production derivative is expected to reject re-transformation.
+        try:
+            patched = bundle.patch_dropbear_package(original)
+        except ValueError:
+            members = bundle.read_tar(original)
+            for member, content in list(members):
+                if member.name.lstrip('./') == 'data.tar.gz':
+                    files = bundle.read_tar(content)
+                    for entry, content2 in list(files):
+                        if entry.name.lstrip('./') == 'opt/etc/init.d/S51dropbear':
+                            content2 = content2.replace(b'    /opt/bin/sh /opt/etc/xkeen-first-access verify || return 1\n', b'')
+                            files[files.index(next(pair for pair in files if pair[0] == entry))] = (entry, content2)
+                    members[members.index((member, content))] = (member, bundle.pack_tar(files))
+            patched = bundle.patch_dropbear_package(bundle.pack_tar(members))
+        with tarfile.open(fileobj=io.BytesIO(patched)) as ipk:
+            member = next(n for n in ipk.getnames() if n.endswith('data.tar.gz'))
+            with tarfile.open(fileobj=io.BytesIO(ipk.extractfile(member).read())) as data:
+                init = data.extractfile('./opt/etc/init.d/S51dropbear').read()
+        # Execute the actual transformed start path; the inaccessible gate must
+        # prevent even an attempted launch, before any daemon/host-key access.
+        with tempfile.TemporaryDirectory() as root:
+            opt = pathlib.Path(root) / 'opt'
+            (opt / 'etc/config').mkdir(parents=True)
+            (opt / 'sbin').mkdir()
+            (opt / 'etc/config/dropbear.conf').write_text('PORT=222\nPIDFILE=/nonexistent-fixture-pid\n')
+            marker = pathlib.Path(root) / 'daemon-attempted'
+            fake = opt / 'sbin/dropbear'
+            fake.write_text('#!/bin/sh\ntouch ' + str(marker) + '\nexit 1\n')
+            fake.chmod(0o700)
+            script = init.decode().replace('/opt/', str(opt) + '/')
+            run = subprocess.run(['/bin/sh', '-c', script+'\nstart\n'], capture_output=True)
+            self.assertNotEqual(run.returncode, 0)
+            self.assertFalse(marker.exists(), 'daemon ran without positive readiness')
 
 
 if __name__ == '__main__':

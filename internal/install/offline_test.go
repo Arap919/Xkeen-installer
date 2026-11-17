@@ -130,3 +130,15 @@ func TestIncompletePackageStateAndUnknownUpgradeHooksStopBeforeWrites(t *testing
 		}
 	}
 }
+
+func TestFreshCredentialPackagesNeverReachExistingInstall(t *testing.T) {
+	for _, name := range []string{"dropbear", "opt-ndmsv2"} {
+		f := fixture()
+		if err := inspectPackageState(context.Background(), f, map[string]string{name: "1"}); err == nil {
+			t.Fatalf("fresh-only credential package selected: %s", name)
+		}
+		if f.writes != 0 {
+			t.Fatal("existing credentials changed before rejection")
+		}
+	}
+}

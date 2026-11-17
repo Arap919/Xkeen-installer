@@ -21,17 +21,7 @@ for fixture_arch in "$@"; do
       ln -s /opt/bin /fixture/bin
       ln -s /opt/sbin /fixture/sbin
       printf "SEC001_NETWORK_NONE\n" >/fixture-isolated
-      if [ "$XKEEN_OFFLINE_FIXTURE_ARCH" = arm64 ]; then
-        if ! /usr/bin/env PATH=/opt/bin:/opt/sbin:/usr/bin:/usr/sbin:/bin:/sbin /opt/bin/sh /opt/bin/install >/tmp/bootstrap.log 2>&1; then
-          grep -Ei "error|failed|cannot|not found" /tmp/bootstrap.log || true
-          exit 1
-        fi
-      else
-        if ! /usr/local/bin/proot --kill-on-exit -0 -q "/usr/bin/qemu-$XKEEN_OFFLINE_FIXTURE_ARCH-static" -r /fixture -b /opt -b /proc -b /dev -w / /opt/bin/sh -c "export PATH=/opt/bin:/opt/sbin:/usr/bin:/usr/sbin:/bin:/sbin; exec /opt/bin/sh /opt/bin/install" >/tmp/bootstrap.log 2>&1; then
-          grep -Ei "error|failed|cannot|not found" /tmp/bootstrap.log || true
-          exit 1
-        fi
-      fi
+      /test/offline-fixture.test -test.run "^TestNativeFirstAccess$" -test.v -test.timeout 10m
       /test/offline-fixture.test -test.run "^TestNativeOfflinePackagePhase$" -test.v -test.timeout 10m
     '
 done

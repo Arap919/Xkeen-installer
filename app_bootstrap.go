@@ -80,16 +80,20 @@ func (a *App) DiscoverBootstrap(c ConnectionRequest) (BootstrapDiscovery, error)
 	a.address = c.Host
 	return BootstrapDiscovery{Model: snap.Model, Hardware: snap.Hardware, Arch: string(snap.Arch), Volumes: snap.EligibleVolumes()}, nil
 }
-func (a *App) PrepareBootstrap(uuid string) (bootstrap.Plan, error) {
+func (a *App) PrepareBootstrap(uuid, password, repeat string) (bootstrap.Plan, error) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	if a.busy || a.bootstrap == nil {
 		return bootstrap.Plan{}, publicError("Повторите подключение к KeeneticOS")
 	}
+	defer func() { password = ""; repeat = "" }()
 	ctx, cancel := context.WithTimeout(a.ctx, 45*time.Second)
 	defer cancel()
-	p, e := a.bootstrap.Prepare(ctx, uuid)
+	p, e := a.bootstrap.Prepare(ctx, uuid, password, repeat)
 	if e != nil {
+		if validation := bootstrap.ValidatePassword(password, repeat); validation != nil {
+			return bootstrap.Plan{}, publicError(validation.Error())
+		}
 		return bootstrap.Plan{}, publicError("План Entware заблокирован: нужен однозначный доступный корень EXT4 без существующего Entware, чужого архива, другого OPKG-диска или пользовательского initrc")
 	}
 	return p, nil
@@ -187,6 +191,8 @@ func bootstrapStartFailure(err error) error {
 		"download":                  "Не удалось прочитать и проверить встроенный архив Entware.",
 		"pre-transfer-inspect":      "Проверка KeeneticOS после скачивания архива не завершилась; копирование не начато.",
 		"store-check":               "Проверка корня SMB перед копированием архива не прошла.",
+		"credential-transfer":       "Не удалось безопасно передать новый пароль Entware. SSH остаётся заблокирован; проверьте частичную установку.",
+		"credential-check":          "Контрольная проверка нового пароля Entware не прошла. OPKG не запущен.",
 		"transfer":                  "Передача архива Entware через SMB или его контрольное чтение не завершились. Команды запуска OPKG не отправлены.",
 		"post-transfer-inspect":     "Архив передан через SMB; последующая проверка KeeneticOS не прошла. Команды запуска OPKG не отправлены.",
 		"post-transfer-store-check": "Архив передан; проверка SMB перед запуском OPKG не прошла. Команды запуска OPKG не отправлены.",

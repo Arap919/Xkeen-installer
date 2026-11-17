@@ -38,8 +38,8 @@ export function Inspect(arg1) {
   return window['go']['main']['App']['Inspect'](arg1);
 }
 
-export function PrepareBootstrap(arg1) {
-  return window['go']['main']['App']['PrepareBootstrap'](arg1);
+export function PrepareBootstrap(arg1, arg2, arg3) {
+  return window['go']['main']['App']['PrepareBootstrap'](arg1, arg2, arg3);
 }
 
 export function PreparePlan(arg1) {

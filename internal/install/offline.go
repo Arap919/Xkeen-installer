@@ -109,6 +109,7 @@ func inspectPackageFeeds(ctx context.Context, t router.Transport) error {
 
 var packageName = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9+_.-]*$`)
 var ErrPackageState = errors.New("Установка остановлена: состояние /opt/lib/opkg/status неполное или содержит незавершённые операции. Сначала проверьте и восстановите систему пакетов из доверенных локальных пакетов; мастер не запускает старые hooks и не изменяет status")
+var ErrFreshCredentialPackages = errors.New("Установка остановлена до пакетных изменений: набор зависимостей затрагивает пакеты первого доступа Entware (root/SSH). Существующие пароли и служба SSH не изменены; требуется отдельная проверка набора")
 var ErrOldPackageHooks = errors.New("Установка остановлена: версия установленного пакета отличается от закреплённого набора, и присутствуют старые hooks вне проверенного набора. Сначала требуется отдельная проверка этого обновления; установленные пакеты и hooks не изменены")
 
 func installedPackageVersions(data []byte) (map[string]string, error) {
@@ -166,6 +167,9 @@ func inspectPackageState(ctx context.Context, t router.Transport, targets map[st
 		return err
 	}
 	for name, version := range targets {
+		if name == "dropbear" || name == "opt-ndmsv2" {
+			return ErrFreshCredentialPackages
+		}
 		old, exists := installed[name]
 		if !exists || old == version {
 			continue
@@ -184,7 +188,7 @@ func inspectPackageState(ctx context.Context, t router.Transport, targets map[st
 // PackageFailureMessage exposes only static, reviewed remediation instructions.
 // Wrapped transport output is never included in a user-facing package failure.
 func PackageFailureMessage(err error) string {
-	for _, known := range []error{ErrInsecureFeeds, ErrExternalPackageHooks, ErrPackageState, ErrOldPackageHooks} {
+	for _, known := range []error{ErrInsecureFeeds, ErrExternalPackageHooks, ErrPackageState, ErrOldPackageHooks, ErrFreshCredentialPackages} {
 		if errors.Is(err, known) {
 			return known.Error()
 		}

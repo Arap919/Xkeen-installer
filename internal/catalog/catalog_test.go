@@ -13,9 +13,9 @@ func TestResolveArchitectureAssets(t *testing.T) {
 		arch                      RouterArch
 		ui, mihomo, xray, entware string
 	}{
-		{ARM64, "xkeen-ui-arm64-v8a", "mihomo-linux-arm64-v1.19.33.gz", "Xray-linux-arm64-v8a.zip", "2026-11-16/arm64.tar.gz"},
-		{MIPSel, "xkeen-ui-mips32le", "mihomo-linux-mipsle-softfloat-v1.19.33.gz", "Xray-linux-mips32le.zip", "2026-11-16/mipsel.tar.gz"},
-		{MIPS, "xkeen-ui-mips32", "mihomo-linux-mips-softfloat-v1.19.33.gz", "Xray-linux-mips32.zip", "2026-11-16/mips.tar.gz"},
+		{ARM64, "xkeen-ui-arm64-v8a", "mihomo-linux-arm64-v1.19.33.gz", "Xray-linux-arm64-v8a.zip", "2026-11-17/arm64.tar.gz"},
+		{MIPSel, "xkeen-ui-mips32le", "mihomo-linux-mipsle-softfloat-v1.19.33.gz", "Xray-linux-mips32le.zip", "2026-11-17/mipsel.tar.gz"},
+		{MIPS, "xkeen-ui-mips32", "mihomo-linux-mips-softfloat-v1.19.33.gz", "Xray-linux-mips32.zip", "2026-11-17/mips.tar.gz"},
 	}
 	for _, tc := range cases {
 		for _, want := range []struct {
@@ -113,7 +113,7 @@ func TestEntwareReviewedPinsAreExplicitlyLocal(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if a.Version != "offline-2026-11-16" || len(a.Integrity.SHA256) != 64 || a.Size <= 3232671 || !strings.HasPrefix(a.Integrity.Source, "installer-offline-bundle:2026-11-16:") {
+	if a.Version != "offline-2026-11-17" || len(a.Integrity.SHA256) != 64 || a.Size <= 3232671 || !strings.HasPrefix(a.Integrity.Source, "installer-offline-bundle:2026-11-17:") {
 		t.Fatalf("missing explicit reviewed pin: %+v", a)
 	}
 	if err := Verify(a, strings.NewReader("archive")); err == nil || !strings.Contains(err.Error(), "size") {

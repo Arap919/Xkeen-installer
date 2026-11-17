@@ -318,6 +318,62 @@ def patch_locale_package(data, arch):
     return pack_tar(members)
 
 
+
+
+def patch_account_package(data):
+    members = read_tar(data)
+    patched = False
+    for entry, content in members:
+        if entry.name.lstrip('./') != 'data.tar.gz':
+            continue
+        files = read_tar(content)
+        for member, account in files:
+            if member.name.lstrip('./') != 'opt/etc/passwd':
+                continue
+            if hashlib.sha256(account).hexdigest() != '51f28bc4f23398131fac87e065825e7349621ea1b5d3f141bb1570b28e0f250b':
+                raise ValueError('Unknown fresh account file; independent review required')
+            lines = account.splitlines(keepends=True)
+            roots = 0
+            for index, line in enumerate(lines):
+                if line.startswith(b'root:'):
+                    fields = line.split(b':')
+                    if len(fields) != 7:
+                        raise ValueError('Unexpected root account format')
+                    fields[1] = b'!'
+                    lines[index] = b':'.join(fields)
+                    roots += 1
+            if roots != 1:
+                raise ValueError('Ambiguous root account')
+            files[files.index((member, account))] = (member, b''.join(lines))
+            patched = True
+        members[members.index((entry, content))] = (entry, pack_tar(files))
+    if not patched:
+        raise ValueError('Missing reviewed fresh account')
+    return pack_tar(members)
+
+def patch_dropbear_package(data):
+    members = read_tar(data)
+    patched = False
+    for entry, content in members:
+        if entry.name.lstrip('./') != 'data.tar.gz':
+            continue
+        files = read_tar(content)
+        for member, script in files:
+            if member.name.lstrip('./') != 'opt/etc/init.d/S51dropbear':
+                continue
+            if hashlib.sha256(script).hexdigest() != '3a531c9a5f4aab0797ae8d40d0235966100ec13139a4bbe2078cbc76d0d1ee4e':
+                raise ValueError('Unknown Dropbear init; independent review required')
+            original = b'start()\n{\n'
+            gate = b'start()\n{\n    /opt/bin/sh /opt/etc/xkeen-first-access verify || return 1\n'
+            if script.count(original) != 1:
+                raise ValueError('Unexpected Dropbear start function')
+            files[files.index((member, script))] = (member, script.replace(original, gate))
+            patched = True
+        members[members.index((entry, content))] = (entry, pack_tar(files))
+    if not patched:
+        raise ValueError('Missing reviewed Dropbear init')
+    return pack_tar(members)
+
 def build_archive(base, lock, packages):
     validate_lock(lock)
     arch = lock['arch']
@@ -336,17 +392,18 @@ def build_archive(base, lock, packages):
     packages = dict(packages)
     lock['format'] = 2
     for record in lock['packages']:
-        if record['name'] != 'locales':
+        if record['name'] not in ('locales', 'dropbear', 'opt-ndmsv2'):
             continue
         original_size, original_digest = record['size'], record['sha256']
-        patched = patch_locale_package(packages[record['filename']], arch)
+        source_package = packages[record['filename']]
+        patched = (patch_locale_package(source_package, arch) if record['name'] == 'locales' else patch_dropbear_package(source_package) if record['name'] == 'dropbear' else patch_account_package(source_package))
         record['source_url'] = record['url']
         record['source_sha256'] = original_digest
         record['source_size'] = original_size
         record['url'] = 'bundled://entware/' + arch + '/' + record['filename']
         record['size'] = len(patched)
         record['sha256'] = hashlib.sha256(patched).hexdigest()
-        record['transformation'] = 'locales-no-network-fallback-v1'
+        record['transformation'] = {'locales': 'locales-no-network-fallback-v1', 'dropbear': 'fresh-dropbear-positive-ready-v1', 'opt-ndmsv2': 'fresh-root-locked-v1'}[record['name']]
         record['stanza'] = re.sub(r'(?m)^Size: .*$', 'Size: ' + str(record['size']), record['stanza'])
         record['stanza'] = re.sub(r'(?m)^SHA256sum: .*$', 'SHA256sum: ' + record['sha256'], record['stanza'])
         packages[record['filename']] = patched
@@ -361,6 +418,8 @@ def build_archive(base, lock, packages):
                 raise ValueError('Duplicate original archive member')
             seen.add(entry.name)
             data = original.extractfile(entry).read() if entry.isfile() else None
+            if entry.name in ('etc/dropbear/dropbear_rsa_host_key', 'etc/dropbear/dropbear_ed25519_host_key'):
+                continue
             if entry.name == 'etc/opkg.conf':
                 config += ''.join(line + '\n' for line in data.decode().splitlines() if line.startswith('arch '))
             members.append((copy.copy(entry), data))
@@ -376,6 +435,17 @@ def build_archive(base, lock, packages):
                 raise ValueError('Unexpected upstream bootstrap commands; review required')
             script = script.replace(update, 'if ! ' + opkg + ' update')
             script = script.replace(install, 'if ! ' + opkg + ' install "$ipk"')
+            # Fail closed before any package pass; canonical fresh init enforces
+            # the same positive readiness on reboot, not merely this late start.
+            script = '/opt/bin/sh /opt/etc/xkeen-first-access revoke || exit 1\n' + script
+            key_start = script.index('# keygen\n')
+            key_end = script.index("logger -t installer '[4/5]", key_start)
+            script = script[:key_start] + '/opt/bin/sh /opt/etc/xkeen-first-access configure || exit 1\n\n' + script[key_end:]
+            script = script.replace('/opt/etc/init.d/S51dropbear start', '/opt/etc/init.d/S51dropbear start || exit 1')
+            message_start = script.index('if grep -q "222"')
+            message_end = script.index('\nfi', message_start) + len('\nfi')
+            script = script[:message_start] + "logger -t installer 'SSH Entware использует новый пароль, заданный в мастере.'\n" + script[message_end:]
+            script = script.replace('Не забудьте сменить пароль и номер порта!', 'Используйте новый пароль и отдельно проверьте SSH-ключ.')
             data = script.encode()
             replaced = True
         elif entry.name == 'etc/opkg.conf':
@@ -388,12 +458,14 @@ def build_archive(base, lock, packages):
         rewritten.append((entry, data))
     if not replaced or 'etc/opkg.conf' not in seen:
         raise ValueError('Missing original bootstrap entrypoint or configuration')
-    additional = {'etc/opkg-offline.conf': config.encode(),
+    additional = {'etc/xkeen-first-access': pathlib.Path(__file__).with_name('entware-first-access.sh').read_bytes(),
+                  'etc/xkeen-bootstrap/arch': (arch + '\n').encode(),
+                  'etc/opkg-offline.conf': config.encode(),
                   'etc/xkeen-offline-source-lock.json': source_lock,
                   '.xkeen-installer-repository/Packages': ''.join(p['stanza'] for p in lock['packages']).encode(),
                   '.xkeen-installer-repository/reviewed-lock.json': (json.dumps(lock, indent=2) + '\n').encode()}
     additional.update({'.xkeen-installer-repository/' + name: data for name, data in packages.items()})
-    if len(rewritten) + len(additional) + 1 > 1000 or sum(entry.size for entry, _ in rewritten) + sum(map(len, additional.values())) > 120 << 20:
+    if len(rewritten) + len(additional) + 2 > 1000 or sum(entry.size for entry, _ in rewritten) + sum(map(len, additional.values())) > 120 << 20:
         raise ValueError('Offline archive exceeds the runtime archive validation limits')
     stream = io.BytesIO()
     with gzip.GzipFile(fileobj=stream, mode='wb', filename='', mtime=0, compresslevel=9) as compressed:
@@ -401,6 +473,10 @@ def build_archive(base, lock, packages):
             for entry, data in rewritten:
                 output.addfile(entry, io.BytesIO(data) if data is not None else None)
             directory = tarfile.TarInfo('.xkeen-installer-repository')
+            directory.type = tarfile.DIRTYPE
+            directory.mode = 0o700
+            output.addfile(directory)
+            directory = tarfile.TarInfo('etc/xkeen-bootstrap')
             directory.type = tarfile.DIRTYPE
             directory.mode = 0o700
             output.addfile(directory)

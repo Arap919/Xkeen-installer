@@ -167,17 +167,17 @@ P1 means address or explicitly resolve before broad distribution. P2 means a con
 
 ### SEC-007: Close the default SSH credential window in fresh Entware
 
-**Status:** Open; verify effective credentials first
+**Status:** Implemented and independently reviewed; isolated runtime passed all three architectures; final desktop CI pending
 **Priority:** P1
 **Evidence:** ARM64 bundled `bin/install` starts `S51dropbear` and advertises default root credentials. `frontend/src/ui.ts` recommends a manual password change. The actual installed package contents/password state were not independently verified.
 **Attack prerequisites:** A fresh installation retains reusable default credentials and another device can reach the SSH service.
 **Impact:** Root access to Entware/router storage and a foothold in the local network.
 
-- [ ] Inspect the exact downloaded account/dropbear packages and reproduce a clean bootstrap in an isolated environment. Check ARM64, MIPS, and MIPSel behavior; establish whether the advertised password is effective and when SSH begins listening.
-- [ ] If reusable defaults are active, implement secure first-credential setup or equivalent access restriction before SSH becomes reachable. A later warning or changing port 22 to 222 is insufficient.
-- [ ] Keep credential entry in the application or secure local configuration; never require the user to send passwords in chat. Preserve existing installation credentials.
-- [ ] Test the bootstrap-to-SSH handoff: default credentials must not provide unrestricted access, interrupted setup must fail safely, and the intended user must have a documented recovery path.
-- [ ] If the default-credential hypothesis is disproved, close the finding with exact package/version evidence and retain only accurate user guidance.
+- [x] Inspect the exact downloaded account/dropbear packages and reproduce a clean bootstrap in an isolated environment. Check ARM64, MIPS, and MIPSel behavior; establish whether the advertised password is effective and when SSH begins listening.
+- [x] If reusable defaults are active, implement secure first-credential setup or equivalent access restriction before SSH becomes reachable. A later warning or changing port 22 to 222 is insufficient.
+- [x] Keep credential entry in the application or secure local configuration; never require the user to send passwords in chat. Preserve existing installation credentials.
+- [x] Test the bootstrap-to-SSH handoff: default credentials must not provide unrestricted access, interrupted setup must fail safely, and the intended user must have a documented recovery path.
+- [x] If the default-credential hypothesis is disproved, close the finding with exact package/version evidence and retain only accurate user guidance.
 
 **Acceptance:** Either the suspected exposure is disproved with reproducible evidence, or a new installation cannot be taken over using reusable default SSH credentials during or after setup.
 **Likely files:** bundled bootstrap archives and pins if changes are required, `internal/bootstrap/session.go`, `app_bootstrap.go`, `frontend/src/wizard.ts`, `frontend/src/ui.ts`, bootstrap/handoff tests.
@@ -279,3 +279,19 @@ when a new single-job attempt was created; it was not a passing ARM64 result.
 - Disposable network-denied Linux containers compared crypt(advertised default, stored hash): true for ARM64, MIPS and MIPSel. Only boolean outcomes were printed; no account hash or private host key was logged.
 - Dropbear 2026.94-4 has identical S51dropbear SHA256 3a531c9a5f4aab0797ae8d40d0235966100ec13139a4bbe2078cbc76d0d1ee4e. It invokes dropbear with port and pidfile only, without disabling password authentication. Its postinst generates missing host keys but does not start the service; bin/install explicitly starts it after key regeneration.
 - This establishes reusable account credentials and the configured startup path, not real-router reachability or a successful remote login. Full isolated bootstrap-to-SSH tests remain required. No SEC-007 product code changed.
+
+## SEC-007 implementation progress (2026-11-17)
+
+- User approved the password-first design in docs/superpowers/specs/2026-11-17-sec007-first-password-design.md and its implementation. Work remains in the same checkout; no router/trust/release changes.
+- Added transient fresh-only password/repeat fields, identical frontend/backend limits, SHA-512-crypt v1.0.6 (100000 rounds, random 16-character salt), private one-shot hash state and bounded signed-SMB sidecar with exact readback before firmware trigger. No public plan/error contains the hash.
+- Added positive-ready Dropbear startup guard, root account and regenerated-host-key binding, readiness revocation/service stop before package passes, and a pinned fresh account derivative that locks root until the selected hash is installed. Existing installer dependency closure refuses fresh account/SSH packages before writes.
+- Independent specialist found a shared signal cleanup trap that could continue after TERM. A real ARM64 keygen fixture reproduced it; separate EXIT cleanup and terminating signal handlers now replace it. Final fixture rerun remains pending.
+- Initial ARM64 real bootstrap/auth and offline package-phase checks passed. MIPS/MIPSel normal daemon processes under PRoot/QEMU accepted TCP but closed before auth; these EOF results are not recorded as password rejection. Target MIPS libcrypt independently matched the selected hash in 0.41s and root lookup matched the installed account. Exact-binary inetd fixtures are being evaluated without changing production daemon behavior.
+- Full Go suite, production vet, frontend suite and source govulncheck passed at intermediate snapshots. Final snapshot, all-architecture acceptance, independent re-review and native desktop CI are still required before closure.
+
+### SEC-007 final local acceptance (2026-11-17)
+
+- Full network-denied fixture wrapper exited 0. ARM64 FirstAccess 20.79s / OfflinePackagePhase 2.55s; MIPS 62.69s / 29.81s; MIPSel 71.03s / 30.17s. Exact Dropbear accepted the selected password, rejected default/wrong credentials at the protocol auth step, and passed missing/stale readiness, TERM during keygen, keygen failure and safe completion checks.
+- MIPS/MIPSel auth uses direct QEMU normal Dropbear and its built-in fork fallback after fexecve Exec format error; bootstrap/init/package tests use PRoot. These packages lack inetd support. Failed PRoot EOF attempts are excluded from positive evidence; native MIPS reexec and real Keenetic firmware/RCI/handoff remain outside isolated evidence.
+- Final local suite: eight Go packages, production vet, 23 Python security tests, frontend typecheck/63 tests/build and git diff --check passed. New dependency is pinned github.com/sergeymakinen/go-crypt v1.0.6. Production source govulncheck clean; rebuilt macOS ARM64 binary scan pending/final CI gates authoritative for shipped candidates.
+- Separate security specialist confirmed the signal finding corrected, reviewed precise failure assertions and one-shot approval lifecycle, independently reproduced all three final archive bytes/pins, and reported no unresolved concrete finding. Closure waits for native desktop CI; no release or router mutation performed.

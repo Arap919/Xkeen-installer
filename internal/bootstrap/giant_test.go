@@ -75,7 +75,7 @@ func TestGiantAutomaticSMBSelectedLabelAndLateRuntimeCheck(t *testing.T) {
 	}
 	store := &fixtureStore{}
 	session := NewSession(c, store)
-	plan, e := session.Prepare(ctx, "")
+	plan, e := session.Prepare(ctx, "", "Fixture-password-2026!", "Fixture-password-2026!")
 	if e != nil {
 		t.Fatal(e)
 	}

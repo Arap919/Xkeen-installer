@@ -29,9 +29,9 @@ Entware HTTP requests. Source archives above retain their own independent pins.
 
 | Architecture | Packages | Compressed bytes | Final SHA256 |
 | --- | ---: | ---: | --- |
-| arm64 | 78 | 23923438 | 3fbdd2dddf39e97cafd63fc1a7d9df1ef81edaad423f298518d493cae1163a7d |
-| mips | 79 | 23854528 | ac5e4a80adb76965bc704ef4e08d20e82556bf9cc87f51af11d183ffd2bc7058 |
-| mipsel | 79 | 23552819 | fc4eb8bb49fac1fd722f589e63b6189e2296cbe52e6d47e8a8761a5a6f2caf7d |
+| arm64 | 78 | 23925092 | 84155665caeeb509feb7c373c698d456f6cc3ce7a0c0af6b77fce9a2f1672df6 |
+| mips | 79 | 23855348 | 15ac0d03f8369aedd15d62ad361f1595705be47e40693903c1a3b2d248caa06d |
+| mipsel | 79 | 23554566 | 1b6037a43a6a386677e879dd779c41d23d338b93ffbf5ad7ca9ca0ef473a05ba |
 
 Acquisition evidence: [CI run 43849821304](https://github.com/Arap919/Xkeen-installer/actions/runs/43849821304).
 Package indexes and exact IPK bytes were fetched only from certificate-validated
@@ -49,7 +49,7 @@ The complete bootstrap and optional installer dependency closure is embedded in
 IPKs and format-2 `reviewed-lock.json` describe the final local bytes. The original
 format-1 acquisition lock cannot be confused with this derived manifest.
 
-One package hook is deliberately changed: `locales` 2.27-9 postinst previously
+The locales package hook is deliberately changed: `locales` 2.27-9 postinst previously
 called HTTP wget if localedef failed to create its archive. The transformation
 `locales-no-network-fallback-v1` replaces only that fallback with a Russian error
 and exit 1; its data.tar.gz is preserved byte-for-byte. The original postinst
@@ -130,3 +130,56 @@ No binfmt registration or host trust-store change is required. Current native
 fixtures passed all three targets. The actual upstream control scripts, source
 lock, derivative bytes and catalog pins remain the authority; a successful
 fixture is not proof against previously compromised root-level router software.
+
+## SEC-007 fresh access derivation
+
+The source acquisition lock and original archives are unchanged. In addition to
+the locales transformation, fresh-dropbear-positive-ready-v1 changes only the
+pinned S51dropbear start entry in dropbear 2026.94-4 data.tar.gz. The original init
+SHA256 is 3a531c9a5f4aab0797ae8d40d0235966100ec13139a4bbe2078cbc76d0d1ee4e
+on all three architectures. Unknown init bytes fail preparation. Source and
+derived package digests are separate manifest fields. The normal installer
+rejects dropbear/opt-ndmsv2 in its selected dependency closure before writes;
+it never applies this fresh-only policy to existing credentials/init.
+
+The archive removes both upstream private host keys and adds the reviewed
+etc/xkeen-first-access script plus an architecture marker. bin/install revokes
+readiness and stops an existing fresh service before package operations, installs
+the selected root hash, generates both host keys, checks current state, removes
+the transferable credential, atomically publishes readiness, then starts SSH.
+The gate checks current passwd and both key-file digests at every service start.
+Missing or stale state denies startup; no default-credential fallback exists.
+
+The desktop uses github.com/sergeymakinen/go-crypt v1.0.6 SHA-512-crypt with
+100000 rounds and a random 16-character salt; see its primary API documentation:
+https://pkg.go.dev/github.com/sergeymakinen/go-crypt/sha512.
+The signed SMB sidecar is capped at 512 bytes and binds plan ID, volume UUID,
+architecture and canonical archive SHA256 to the hash. It is never shell-sourced.
+SMB signing supplies integrity, not confidentiality; a captured hash permits
+offline guessing. The chosen UI requires a separate password of at least 16
+Unicode code points and at most 1024 UTF-8 bytes, rejecting NUL/CR/LF and invalid
+Unicode. Plaintext is not persisted or included in commands/events/reports.
+
+The previous SEC-001 isolated results are historical evidence for its old
+candidate; updated package and real SSH fixtures must pass before SEC-007 closes.
+Real Keenetic firmware extraction and real-device SSH reachability remain outside
+isolated userspace evidence.
+
+The opt-ndmsv2 1.0-17 derivative fresh-root-locked-v1 checks the original passwd
+file SHA256 51f28bc4f23398131fac87e065825e7349621ea1b5d3f141bb1570b28e0f250b
+and changes only root's password field to !. No reusable default hash is installed,
+including a repeated fresh package pass; the remaining account fields/users are
+unchanged. Existing installation paths reject this package before writes.
+The signal handler uses EXIT only for cleanup; HUP/INT/TERM exit unsuccessfully
+before readiness. The real keygen-interruption fixture reproduced the previous
+shared-handler bug before its correction.
+
+Final isolated first-access and offline package wrapper exited 0 on ARM64, MIPS
+and MIPSel (2026-11-17). Authentication checks use the exact packaged Dropbear:
+normal native ARM64; direct QEMU normal MIPS/MIPSel with its existing fork
+fallback after fexecve Exec format error. The MIPS packages do not support inetd.
+Bootstrap/init/package operations still execute through PRoot. Neither an EOF
+nor connection failure counts as password rejection. Native MIPS reexec, remote
+commands inside that emulated SSH session and real Keenetic firmware remain
+outside this evidence. Independent security review reproduced these final three
+archive bytes and verified all transformed members/pins.

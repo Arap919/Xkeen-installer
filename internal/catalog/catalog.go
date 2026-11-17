@@ -55,22 +55,22 @@ func Resolve(c Component, arch RouterArch) (Artifact, error) {
 	}
 	a := Artifact{Component: c, Arch: arch}
 	if c == Entware {
-		a.Version = "offline-2026-11-16"
+		a.Version = "offline-2026-11-17"
 		switch arch {
 		case ARM64:
-			a.URL = "bundled://entware/2026-11-16/arm64.tar.gz"
-			a.Size = 23923438
-			a.Integrity.SHA256 = "3fbdd2dddf39e97cafd63fc1a7d9df1ef81edaad423f298518d493cae1163a7d"
+			a.URL = "bundled://entware/2026-11-17/arm64.tar.gz"
+			a.Size = 23925092
+			a.Integrity.SHA256 = "84155665caeeb509feb7c373c698d456f6cc3ce7a0c0af6b77fce9a2f1672df6"
 		case MIPSel:
-			a.URL = "bundled://entware/2026-11-16/mipsel.tar.gz"
-			a.Size = 23552819
-			a.Integrity.SHA256 = "fc4eb8bb49fac1fd722f589e63b6189e2296cbe52e6d47e8a8761a5a6f2caf7d"
+			a.URL = "bundled://entware/2026-11-17/mipsel.tar.gz"
+			a.Size = 23554566
+			a.Integrity.SHA256 = "1b6037a43a6a386677e879dd779c41d23d338b93ffbf5ad7ca9ca0ef473a05ba"
 		case MIPS:
-			a.URL = "bundled://entware/2026-11-16/mips.tar.gz"
-			a.Size = 23854528
-			a.Integrity.SHA256 = "ac5e4a80adb76965bc704ef4e08d20e82556bf9cc87f51af11d183ffd2bc7058"
+			a.URL = "bundled://entware/2026-11-17/mips.tar.gz"
+			a.Size = 23855348
+			a.Integrity.SHA256 = "15ac0d03f8369aedd15d62ad361f1595705be47e40693903c1a3b2d248caa06d"
 		}
-		a.Integrity.Source = "installer-offline-bundle:2026-11-16:" + a.URL
+		a.Integrity.Source = "installer-offline-bundle:2026-11-17:" + a.URL
 		return a, nil
 	}
 	if c == Watchdog {
