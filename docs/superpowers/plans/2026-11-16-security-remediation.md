@@ -96,7 +96,7 @@ P1 means address or explicitly resolve before broad distribution. P2 means a con
 
 ### SEC-003: Resolve trust utilities from trusted system locations
 
-**Status:** Open
+**Status:** Implementation in progress
 **Priority:** P2
 **Evidence:** `internal/tls/trust.go`, `ExecRunner.LookPath` and Windows/Linux trust commands.
 **Attack prerequisites:** A malicious executable can be placed in a directory preceding the genuine utility in the inherited PATH.
@@ -319,3 +319,19 @@ Evidence limits: custom-root Go x509 verification is not native OS/browser trust
 Scoped review: independent security specialist found no concrete defect in TTL, critical DER, exact DNS/IP constraints, cross-name-form restrictions or mapped-IPv4 normalization. Final local Go suite (eight packages), production vet and git diff --check passed. Additional tests preserve a legacy unconstrained ten-year CA and existing certificate bytes; no root migration is implied. Native CI pending.
 
 Scoped CA implementation commit: 837f876bf1fe8dbf08bada232876325f159479f6. Native CI run https://github.com/Arap919/Xkeen-installer/actions/runs/44171182118 succeeded on Linux AMD64, Windows AMD64, macOS AMD64 and ARM64; release skipped. Root read logs: source/binary govulncheck clean on every target, production tags consistent, frontend 63 tests passed and all four installers uploaded. Local macOS ARM64 app rebuilt and binary govulncheck clean. Requested lifetime/Name Constraints changes are complete; broader SEC-002 remains partially mitigated under the user-defined scope.
+
+## SEC-003 execution checklist (2026-11-17)
+
+- [x] Reproduce hostile PATH utility selection and uncontrolled command environment using safe fixtures; implement trusted Windows system-directory API lookup, fixed Linux locations and existing macOS absolute paths.
+- [x] Verify controlled environment, literal argv for certificate paths with spaces/quotes, missing tools and declined approval; no real trust-store commands.
+- [ ] Obtain separate security review, fix findings, run native CI and record evidence before closure.
+
+Existing CA import/storage policy remains unchanged; this task only hardens command resolution and subprocess environment under the originally authorized task pool.
+
+## SEC-003 implementation evidence (2026-11-17)
+
+- ExecRunner no longer resolves caller PATH/PATHEXT. Windows certutil.exe comes from GetSystemDirectory; Linux install/update-ca-certificates are selected from explicit /usr/bin,/bin,/usr/sbin,/sbin locations; macOS keeps /usr/bin/osascript.
+- Run revalidates an absolute allowed utility. Subprocesses receive only fixed trusted PATH, LANG/LC_ALL; Windows SystemRoot/WINDIR are obtained through OS APIs. Explicit SystemRoot prevents Go from adding an inherited hostile SYSTEMROOT.
+- RED reproduced a hostile PATH lookup; GREEN includes shadowing a genuine allowed utility, unknown paths, missing/non-executable candidate files, literal quoted/spaced argv, dropped loader/config environment and refusal before any lookup. No trust command executed.
+- Final local Go suite (eight packages), production vet, Windows AMD64 test cross-compilation and git diff --check passed.
+- Separate security specialist independently reviewed all four source/test files and local Go environment behavior; no concrete unresolved defect found. Administrative replacement of trusted system files is outside this PATH threat model. Native CI pending; no main push, release, router or real trust-store change.

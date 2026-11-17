@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"os"
 	"os/exec"
 	"path/filepath"
 	"time"
@@ -19,9 +20,46 @@ type CommandRunner interface {
 // ExecRunner is only used by an explicit confirmed ApplyTrust call, never PrepareTLS.
 type ExecRunner struct{}
 
-func (ExecRunner) LookPath(name string) (string, error) { return exec.LookPath(name) }
+func (ExecRunner) LookPath(name string) (string, error) {
+	paths, err := trustedUtilityPaths(name)
+	if err != nil {
+		return "", err
+	}
+	return availableTrustUtility(paths)
+}
+
+func availableTrustUtility(paths []string) (string, error) {
+	for _, path := range paths {
+		if !filepath.IsAbs(path) {
+			continue
+		}
+		info, err := os.Stat(path)
+		if err == nil && info.Mode().IsRegular() && trustUtilityExecutable(info.Mode()) {
+			return path, nil
+		}
+	}
+	return "", errors.New("trusted system utility unavailable")
+}
+
+func trustExecCommand(ctx context.Context, name string, args ...string) (*exec.Cmd, error) {
+	path, err := (ExecRunner{}).LookPath(name)
+	if err != nil || !filepath.IsAbs(name) || path != name {
+		return nil, errors.New("untrusted system utility")
+	}
+	env, err := trustCommandEnvironment()
+	if err != nil {
+		return nil, err
+	}
+	cmd := exec.CommandContext(ctx, path, args...)
+	cmd.Env = env
+	return cmd, nil
+}
+
 func (ExecRunner) Run(ctx context.Context, name string, args ...string) error {
-	cmd := exec.CommandContext(ctx, name, args...)
+	cmd, err := trustExecCommand(ctx, name, args...)
+	if err != nil {
+		return err
+	}
 	if cmd.Run() != nil {
 		return errors.New("trust command failed")
 	}
