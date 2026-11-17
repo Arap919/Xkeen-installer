@@ -1,7 +1,7 @@
 # Security Remediation Plan and Audit Register
 
 **Audit date:** 2026-11-16
-**Status:** Remediation in progress; SEC-001, SEC-005 and SEC-007 closed for the reviewed CI build candidates. Other findings remain open. No exploitation demonstrated.
+**Status:** Remediation in progress; SEC-001, SEC-003, SEC-005 and SEC-007 closed for the reviewed CI build candidates. SEC-002 has the user-requested partial mitigation. Other findings remain open. No exploitation demonstrated.
 **Goal:** Address the security findings from the source and local-artifact audit before broad installer distribution.
 **Architecture:** Preserve the existing SSH transport, reviewed artifact catalog, installation approval gates, and private TLS storage. Remediate each trust boundary independently; do not redesign unrelated installation behavior.
 **Tech stack:** Go, Wails v2, TypeScript, Python, Entware/opkg, GitHub Actions, Windows/macOS/Linux packaging.
@@ -96,16 +96,16 @@ P1 means address or explicitly resolve before broad distribution. P2 means a con
 
 ### SEC-003: Resolve trust utilities from trusted system locations
 
-**Status:** Implementation in progress
+**Status:** Closed for commit 8c28e38 CI candidates
 **Priority:** P2
 **Evidence:** `internal/tls/trust.go`, `ExecRunner.LookPath` and Windows/Linux trust commands.
 **Attack prerequisites:** A malicious executable can be placed in a directory preceding the genuine utility in the inherited PATH.
 **Impact:** Code execution with the desktop application's current privileges; privileged launches increase the impact. This is not a demonstrated remote attack.
 
-- [ ] Resolve Windows `certutil` through the OS system-directory API and Linux utilities through explicitly supported trusted absolute locations. Keep macOS absolute paths.
-- [ ] Use a controlled environment for trust-store commands and their subprocesses; fail with manual instructions if no trusted utility is available.
-- [ ] Add tests with a fake utility in a hostile PATH, a missing system utility, and a certificate path containing spaces/quotes. The fake utility must never execute.
-- [ ] Verify that declining approval still performs no command execution and arguments remain separate argv values.
+- [x] Resolve Windows `certutil` through the OS system-directory API and Linux utilities through explicitly supported trusted absolute locations. Keep macOS absolute paths.
+- [x] Use a controlled environment for trust-store commands and their subprocesses; fail with manual instructions if no trusted utility is available.
+- [x] Add tests with a fake utility in a hostile PATH, a missing system utility, and a certificate path containing spaces/quotes. The fake utility must never execute.
+- [x] Verify that declining approval still performs no command execution and arguments remain separate argv values.
 
 **Acceptance:** Trust operations never select an executable from caller-controlled PATH entries; missing tools fail closed.
 **Likely files:** `internal/tls/trust.go`, platform-specific TLS helpers if needed, `internal/tls/authority_test.go` and/or focused trust tests.
@@ -324,7 +324,7 @@ Scoped CA implementation commit: 837f876bf1fe8dbf08bada232876325f159479f6. Nativ
 
 - [x] Reproduce hostile PATH utility selection and uncontrolled command environment using safe fixtures; implement trusted Windows system-directory API lookup, fixed Linux locations and existing macOS absolute paths.
 - [x] Verify controlled environment, literal argv for certificate paths with spaces/quotes, missing tools and declined approval; no real trust-store commands.
-- [ ] Obtain separate security review, fix findings, run native CI and record evidence before closure.
+- [x] Obtain separate security review, fix findings, run native CI and record evidence before closure.
 
 Existing CA import/storage policy remains unchanged; this task only hardens command resolution and subprocess environment under the originally authorized task pool.
 
@@ -335,3 +335,17 @@ Existing CA import/storage policy remains unchanged; this task only hardens comm
 - RED reproduced a hostile PATH lookup; GREEN includes shadowing a genuine allowed utility, unknown paths, missing/non-executable candidate files, literal quoted/spaced argv, dropped loader/config environment and refusal before any lookup. No trust command executed.
 - Final local Go suite (eight packages), production vet, Windows AMD64 test cross-compilation and git diff --check passed.
 - Separate security specialist independently reviewed all four source/test files and local Go environment behavior; no concrete unresolved defect found. Administrative replacement of trusted system files is outside this PATH threat model. Native CI pending; no main push, release, router or real trust-store change.
+
+### SEC-003 closure (2026-11-18, Europe/Moscow)
+
+Implementation 8c28e38c4411424a4606a14a2e816e925e3fddfe was pushed to
+feature/installer. [CI run 44175147814](https://github.com/Arap919/Xkeen-installer/actions/runs/44175147814)
+completed successfully on that SHA: Windows AMD64 134364616830, macOS ARM64
+134364616856, macOS AMD64 134364616943, Linux AMD64 134364616987. Root read
+complete logs: source/binary govulncheck clean on all four, expected production
+tags, 63 frontend tests, successful native Go tests/vet/build/package uploads.
+Release job skipped. Independent security specialist reviewed source/test
+boundaries and Go's Windows environment behavior, found no unresolved concrete
+defect; did not independently execute CI. No real trust-store import or router
+change was performed. SEC-003 CLOSED for these candidates; administrator-level
+replacement of trusted system files is not attested.
