@@ -168,13 +168,14 @@ func PrepareTLS(address string, existing TLSState) (TLSProposal, error) {
 	}
 	now := time.Now()
 	serial := func() *big.Int { n, _ := rand.Int(rand.Reader, new(big.Int).Lsh(big.NewInt(1), 128)); return n }
-	ca := &x509.Certificate{SerialNumber: serial(), Subject: pkix.Name{CommonName: "XKeen Installer local CA"}, NotBefore: now.Add(-5 * time.Minute), NotAfter: now.AddDate(10, 0, 0), IsCA: true, BasicConstraintsValid: true, KeyUsage: x509.KeyUsageCertSign | x509.KeyUsageCRLSign, MaxPathLenZero: true}
-	leaf := &x509.Certificate{SerialNumber: serial(), Subject: pkix.Name{CommonName: address}, NotBefore: now.Add(-5 * time.Minute), NotAfter: now.AddDate(1, 0, 0), BasicConstraintsValid: true, KeyUsage: x509.KeyUsageDigitalSignature, ExtKeyUsage: []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth}}
+	ca := &x509.Certificate{SerialNumber: serial(), Subject: pkix.Name{CommonName: "XKeen Installer local CA"}, NotBefore: now.Add(-5 * time.Minute), NotAfter: now.AddDate(1, 0, 0), IsCA: true, BasicConstraintsValid: true, KeyUsage: x509.KeyUsageCertSign | x509.KeyUsageCRLSign, MaxPathLenZero: true}
+	leaf := &x509.Certificate{SerialNumber: serial(), Subject: pkix.Name{CommonName: address}, NotBefore: now.Add(-5 * time.Minute), NotAfter: now.Add(90 * 24 * time.Hour), BasicConstraintsValid: true, KeyUsage: x509.KeyUsageDigitalSignature, ExtKeyUsage: []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth}}
 	if ip := net.ParseIP(address); ip != nil {
 		leaf.IPAddresses = []net.IP{ip}
 	} else {
 		leaf.DNSNames = []string{address}
 	}
+	constrainAuthority(ca, address)
 	caDER, e := x509.CreateCertificate(rand.Reader, ca, ca, &caKey.PublicKey, caKey)
 	if e != nil {
 		return TLSProposal{}, errors.New("TLS generation failed")
@@ -189,6 +190,38 @@ func PrepareTLS(address string, existing TLSState) (TLSProposal, error) {
 	}
 	return TLSProposal{&material{address: address, cert: pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: der}), key: encode(key), ca: pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: caDER}), caKey: encode(caKey), status: Prepared, trust: TrustPending}}, nil
 }
+
+// constrainAuthority limits every supported SAN name form, not merely the
+// server certificate's SAN. A DNS subtree also permits descendants, so exclude
+// descendants explicitly. For IP routers, intersecting the same valid reserved
+// subtree in permitted/excluded sets denies all DNS, email and URI names.
+func constrainAuthority(ca *x509.Certificate, address string) {
+	ca.PermittedDNSDomainsCritical = true
+	permitted := strings.ToLower(address)
+	excluded := "." + permitted
+	if ip := net.ParseIP(address); ip != nil {
+		bits := 128
+		if v4 := ip.To4(); v4 != nil {
+			ip = v4
+			bits = 32
+		}
+		ca.PermittedIPRanges = []*net.IPNet{{IP: ip, Mask: net.CIDRMask(bits, bits)}}
+		permitted = "no-names.xkeen.invalid"
+		excluded = permitted
+	} else {
+		ca.ExcludedIPRanges = []*net.IPNet{
+			{IP: net.IPv4zero.To4(), Mask: net.CIDRMask(0, 32)},
+			{IP: net.IPv6zero, Mask: net.CIDRMask(0, 128)},
+		}
+	}
+	ca.PermittedDNSDomains = []string{permitted}
+	ca.ExcludedDNSDomains = []string{excluded}
+	ca.PermittedEmailAddresses = []string{permitted}
+	ca.ExcludedEmailAddresses = []string{excluded}
+	ca.PermittedURIDomains = []string{permitted}
+	ca.ExcludedURIDomains = []string{excluded}
+}
+
 func verifyChain(address string, cert, ca []byte, now time.Time) error {
 	roots := x509.NewCertPool()
 	if len(ca) == 0 || !roots.AppendCertsFromPEM(ca) {

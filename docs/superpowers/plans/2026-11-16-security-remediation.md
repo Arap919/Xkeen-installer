@@ -78,7 +78,7 @@ P1 means address or explicitly resolve before broad distribution. P2 means a con
 
 ### SEC-002: Reduce router certificate trust scope and key lifetime
 
-**Status:** Open
+**Status:** Open; user requested lifetime/Name Constraints only, retaining import and CA key
 **Priority:** P1
 **Evidence:** `internal/tls/certificate.go`, CA template; `internal/tls/authority.go`, retained `ca.key`; `internal/tls/trust.go`, OS root-store import.
 **Attack prerequisites:** Theft of the local CA signing key plus control of the victim's traffic; affected clients must use the modified trust store.
@@ -303,3 +303,17 @@ when a new single-job attempt was created; it was not a passing ARM64 result.
 - Artifact upload IDs: macOS AMD64 14335790806, macOS ARM64 14333879620, Linux AMD64 14333709919, Windows AMD64 14335550363.
 - Reviewer independence: the separate security specialist independently reviewed code and test boundaries, confirmed the signal fix, and reproduced all three final archives byte-for-byte. The reviewer recommended closure with no unresolved concrete code defect. Their separate CI network retrieval did not complete; CI conclusions above are root's direct log verification, not an independent reviewer log audit.
 - Final status: CLOSED for these CI candidates and the recorded isolated runtime scope. Existing installations keep credentials; legacy distributed binaries, real firmware extraction/RCI/SSH handoff, native MIPS reexec and arbitrary concurrent root-level storage/package modifications remain outside this evidence. Signed SMB does not provide confidentiality for the transferable password hash; the approved design requires a long separate password. Broad release remains gated by the other open findings. No release, real-router change or system trust import performed.
+
+## SEC-002 scoped change requested by user (2026-11-17)
+
+The user explicitly chose to retain the existing trust import and persistent CA key, changing only certificate lifetime and Name Constraints. This supersedes the proposed no-import/ephemeral-key designs; it does not authorize migration or deletion of existing roots/keys.
+
+- [x] Add isolated failing tests for newly generated CA lifetime (one calendar year), server lifetime (90 days), critical Name Constraints and unrelated SAN rejection. RED confirmed the old CA accepted all unrelated fixture names.
+- [x] Constrain new IP CAs to one IPv4 /32 or IPv6 /128; constrain DNS CAs to the exact hostname, excluding descendants and all IP SANs. Restrict DNS, email and URI name forms; deny those forms for an IP-only CA using the same valid reserved subtree in permitted/excluded constraints.
+- [x] Preserve existing certificates, CA key persistence and trust commands. Full Go suite passed after implementation.
+- [x] Separate security review and fix any concrete defect within this scoped change.
+- [ ] Record final verification and native CI evidence.
+
+Evidence limits: custom-root Go x509 verification is not native OS/browser trust enforcement. Old imported unconstrained roots remain unchanged. The original SEC-002 migration/key-lifecycle/platform-verification acceptance is not fully met, so the finding remains open/partially mitigated rather than closed. No real trust store or router is modified during development.
+
+Scoped review: independent security specialist found no concrete defect in TTL, critical DER, exact DNS/IP constraints, cross-name-form restrictions or mapped-IPv4 normalization. Final local Go suite (eight packages), production vet and git diff --check passed. Additional tests preserve a legacy unconstrained ten-year CA and existing certificate bytes; no root migration is implied. Native CI pending.
