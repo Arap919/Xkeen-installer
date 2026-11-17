@@ -312,8 +312,10 @@ The user explicitly chose to retain the existing trust import and persistent CA 
 - [x] Constrain new IP CAs to one IPv4 /32 or IPv6 /128; constrain DNS CAs to the exact hostname, excluding descendants and all IP SANs. Restrict DNS, email and URI name forms; deny those forms for an IP-only CA using the same valid reserved subtree in permitted/excluded constraints.
 - [x] Preserve existing certificates, CA key persistence and trust commands. Full Go suite passed after implementation.
 - [x] Separate security review and fix any concrete defect within this scoped change.
-- [ ] Record final verification and native CI evidence.
+- [x] Record final verification and native CI evidence.
 
 Evidence limits: custom-root Go x509 verification is not native OS/browser trust enforcement. Old imported unconstrained roots remain unchanged. The original SEC-002 migration/key-lifecycle/platform-verification acceptance is not fully met, so the finding remains open/partially mitigated rather than closed. No real trust store or router is modified during development.
 
 Scoped review: independent security specialist found no concrete defect in TTL, critical DER, exact DNS/IP constraints, cross-name-form restrictions or mapped-IPv4 normalization. Final local Go suite (eight packages), production vet and git diff --check passed. Additional tests preserve a legacy unconstrained ten-year CA and existing certificate bytes; no root migration is implied. Native CI pending.
+
+Scoped CA implementation commit: 837f876bf1fe8dbf08bada232876325f159479f6. Native CI run https://github.com/Arap919/Xkeen-installer/actions/runs/44171182118 succeeded on Linux AMD64, Windows AMD64, macOS AMD64 and ARM64; release skipped. Root read logs: source/binary govulncheck clean on every target, production tags consistent, frontend 63 tests passed and all four installers uploaded. Local macOS ARM64 app rebuilt and binary govulncheck clean. Requested lifetime/Name Constraints changes are complete; broader SEC-002 remains partially mitigated under the user-defined scope.
