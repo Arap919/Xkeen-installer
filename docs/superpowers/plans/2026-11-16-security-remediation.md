@@ -1,7 +1,7 @@
 # Security Remediation Plan and Audit Register
 
 **Audit date:** 2026-11-16
-**Status:** Remediation in progress; SEC-001 and SEC-005 closed for the reviewed CI build candidates. Other findings remain open. No exploitation demonstrated.
+**Status:** Remediation in progress; SEC-001, SEC-005 and SEC-007 closed for the reviewed CI build candidates. Other findings remain open. No exploitation demonstrated.
 **Goal:** Address the security findings from the source and local-artifact audit before broad installer distribution.
 **Architecture:** Preserve the existing SSH transport, reviewed artifact catalog, installation approval gates, and private TLS storage. Remediate each trust boundary independently; do not redesign unrelated installation behavior.
 **Tech stack:** Go, Wails v2, TypeScript, Python, Entware/opkg, GitHub Actions, Windows/macOS/Linux packaging.
@@ -167,7 +167,7 @@ P1 means address or explicitly resolve before broad distribution. P2 means a con
 
 ### SEC-007: Close the default SSH credential window in fresh Entware
 
-**Status:** Implemented and independently reviewed; isolated runtime passed all three architectures; final desktop CI pending
+**Status:** Closed for commit 8b83e96 CI candidates and isolated first-access fixtures; real Keenetic firmware handoff remains unverified
 **Priority:** P1
 **Evidence:** ARM64 bundled `bin/install` starts `S51dropbear` and advertises default root credentials. `frontend/src/ui.ts` recommends a manual password change. The actual installed package contents/password state were not independently verified.
 **Attack prerequisites:** A fresh installation retains reusable default credentials and another device can reach the SSH service.
@@ -295,3 +295,11 @@ when a new single-job attempt was created; it was not a passing ARM64 result.
 - MIPS/MIPSel auth uses direct QEMU normal Dropbear and its built-in fork fallback after fexecve Exec format error; bootstrap/init/package tests use PRoot. These packages lack inetd support. Failed PRoot EOF attempts are excluded from positive evidence; native MIPS reexec and real Keenetic firmware/RCI/handoff remain outside isolated evidence.
 - Final local suite: eight Go packages, production vet, 23 Python security tests, frontend typecheck/63 tests/build and git diff --check passed. New dependency is pinned github.com/sergeymakinen/go-crypt v1.0.6. Production source govulncheck clean; rebuilt macOS ARM64 binary scan pending/final CI gates authoritative for shipped candidates.
 - Separate security specialist confirmed the signal finding corrected, reviewed precise failure assertions and one-shot approval lifecycle, independently reproduced all three final archive bytes/pins, and reported no unresolved concrete finding. Closure waits for native desktop CI; no release or router mutation performed.
+
+### SEC-007 final closure (2026-11-17)
+
+- Implementation commit 8b83e9608cf1040412f99f5df4c895475b73d623 was pushed to authorized feature/installer. [Native CI run 44097652083](https://github.com/Arap919/Xkeen-installer/actions/runs/44097652083) completed successfully on that head; release skipped.
+- Native jobs succeeded: macOS AMD64 134089092569, macOS ARM64 134089092574, Linux AMD64 134089092683, Windows AMD64 134089102954. Root retrieved complete CI logs and verified source and binary govulncheck both report no vulnerabilities on each platform; embedded Go 1.26.11, expected GOOS/GOARCH and production tags; frontend 63/63 tests; successful packaging/upload. macOS DMG capacity 146 MiB Intel / 145 MiB ARM64.
+- Artifact upload IDs: macOS AMD64 14335790806, macOS ARM64 14333879620, Linux AMD64 14333709919, Windows AMD64 14335550363.
+- Reviewer independence: the separate security specialist independently reviewed code and test boundaries, confirmed the signal fix, and reproduced all three final archives byte-for-byte. The reviewer recommended closure with no unresolved concrete code defect. Their separate CI network retrieval did not complete; CI conclusions above are root's direct log verification, not an independent reviewer log audit.
+- Final status: CLOSED for these CI candidates and the recorded isolated runtime scope. Existing installations keep credentials; legacy distributed binaries, real firmware extraction/RCI/SSH handoff, native MIPS reexec and arbitrary concurrent root-level storage/package modifications remain outside this evidence. Signed SMB does not provide confidentiality for the transferable password hash; the approved design requires a long separate password. Broad release remains gated by the other open findings. No release, real-router change or system trust import performed.

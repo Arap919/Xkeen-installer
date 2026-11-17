@@ -47,7 +47,7 @@
 - [x] Real bootstrap and SSH password auth for all architectures with network denied except isolated loopback fixtures; default/wrong passwords rejected, intended password accepted.
 - [x] Test package-pass interruption/reboot, stale ready after account/key overwrite, missing sidecar, recovery commands, unchanged existing credentials.
 - [x] Full Go/frontend/Python verification, deterministic reproduction, production vet/scans; separate security review and remediate findings.
-- [ ] Commit/push authorized feature branch and run desktop CI; record evidence before SEC-007 closure.
+- [x] Commit/push authorized feature branch and run desktop CI; record evidence before SEC-007 closure.
 
 ## Execution evidence (2026-11-17)
 
@@ -57,3 +57,13 @@
 - SSH negatives require protocol authentication failure, never EOF. Intended password requires a successful handshake. Test wrapper preserves Dropbear multicall argv0 with exec -a for precise TERM injection.
 - Final bash scripts/check_entware_offline.sh exit 0: ARM64 first access 20.79s/offline phase 2.55s; MIPS 62.69s/29.81s; MIPSel 71.03s/30.17s. Tests include missing/stale state, wrong/default passwords, TERM after passwd during keygen, keygen failure and safe completion.
 - Local final checks: Go eight packages, production vet, Python 23/23, frontend typecheck/63 tests/build, diff whitespace passed. Source govulncheck found no vulnerabilities. Independent reviewer reproduced all three final archives byte-for-byte and found no remaining concrete source finding. CI remains pending.
+
+## Closure
+
+Implementation 8b83e9608cf1040412f99f5df4c895475b73d623; CI 44097652083
+all four native targets passed, release skipped. Root verified complete logs,
+source/binary scans, embedded toolchain/tags and uploads. Independent specialist
+reviewed code, tests and reproducible final archives; their CI network retrieval
+did not complete. No unresolved concrete code finding remains. SEC-007 closed
+within the isolated runtime/CI-candidate evidence limits recorded in the parent
+remediation plan; no real-router or release action performed.
