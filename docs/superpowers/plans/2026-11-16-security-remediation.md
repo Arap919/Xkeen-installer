@@ -112,8 +112,9 @@ P1 means address or explicitly resolve before broad distribution. P2 means a con
 
 ### SEC-004: Restrict unauthenticated explicit proxy listeners
 
-**Status:** Open
+**Status:** Skipped by explicit user decision (2026-11-18); DO NOT IMPLEMENT
 **Priority:** P2
+**User decision:** Preserve current LAN access and proxy settings unchanged. The user explicitly instructed that this task must not be performed. The original audit finding and unchecked acceptance items below are retained as historical evidence, not active implementation work. This is not a verified technical remediation.
 **Evidence:** `internal/config/templates/mihomo.yaml`, ports 7890/7891/1080, `allow-lan`, wildcard bind, and absent authentication; `internal/config/templates.go`, generated API/benchmark overrides.
 **Attack prerequisites:** Network access to the explicit proxy ports. WAN availability is not established.
 **Impact:** Unauthorized use of the router/proxy subscription, resource consumption, and possible access-policy bypass.
@@ -349,3 +350,7 @@ boundaries and Go's Windows environment behavior, found no unresolved concrete
 defect; did not independently execute CI. No real trust-store import or router
 change was performed. SEC-003 CLOSED for these candidates; administrator-level
 replacement of trusted system files is not attested.
+
+## SEC-004 user disposition (2026-11-18)
+
+The user explicitly requested leaving LAN HTTP/SOCKS/mixed access unchanged and marking this task as not to be implemented. No proxy configuration, authentication, listener, routing, firewall or reachability changes/tests were made for SEC-004. Work proceeds to SEC-006.
