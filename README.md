@@ -87,3 +87,39 @@ GitHub Actions проверяет pull request в `main` и собирает ч�
 обхода проверки; сначала требуется отдельная проверка состояния через KeeneticOS
 и резервную копию накопителя. Существующие установки, созданные вне этого
 bootstrap, своих паролей и init-скриптов не меняют.
+
+## Проверка происхождения установщика
+
+Новый release-job создаёт GitHub/Sigstore attestations для четырёх установщиков
+и `SHA256SUMS`. В них закреплены хеши финальных файлов и сведения о workflow,
+исходном коммите и окружении сборки. Проверка attestation обязательна до
+публикации релиза; ошибка останавливает выпуск. Права OIDC и записи attestations
+выданы только release-job при push или ручном запуске из `main`. PR и сборки
+других веток таких прав не получают. Долгоживущие ключи подписи не хранятся.
+
+Это начнёт работать с первым релизом, выпущенным обновлённым workflow из `main`.
+Старый `v0.1.0` задним числом не аттестуется. Наличие workflow artifact
+provenance attestations для его бинарников не подтверждено.
+
+Установите GitHub CLI и скачайте установщик из официального релиза.
+Подставьте его имя вместо примера с VERSION и ожидаемый полный SHA исходного
+коммита вместо COMMIT_SHA. Коммит следует сверять с доверенной версией исходников
+релиза. Команда подходит для Bash и PowerShell:
+
+```text
+gh attestation verify ./xkeen-installer-VERSION-windows-amd64-setup.exe --repo Arap919/Xkeen-installer --cert-identity https://github.com/Arap919/Xkeen-installer/.github/workflows/build.yml@refs/heads/main --source-digest COMMIT_SHA --deny-self-hosted-runners
+```
+
+Для Linux/macOS укажите имя соответствующего DEB/DMG. Для проверки манифеста
+выполните ту же команду с `./SHA256SUMS`. Ожидается успешный код завершения:
+attestation из другой ветки, другого workflow или для другого содержимого
+не должна приниматься. Простое совпадение с неаутентифицированным SHA256SUMS
+этой проверки не заменяет.
+
+Attestation подтверждает происхождение из указанного GitHub workflow, а не
+безопасность самого исходного кода. Она не заменяет Windows Authenticode,
+Apple Developer ID и notarization: предупреждения ОС о неизвестном издателе
+могут сохраняться. Платные сертификаты в этом этапе не используются.
+
+Техническая справка: [GitHub artifact attestations](https://docs.github.com/en/actions/how-tos/secure-your-work/use-artifact-attestations/use-artifact-attestations)
+и [параметры gh attestation verify](https://cli.github.com/manual/gh_attestation_verify).

@@ -149,7 +149,7 @@ P1 means address or explicitly resolve before broad distribution. P2 means a con
 
 ### SEC-006: Establish publisher authenticity for distributed installers
 
-**Status:** Open; published v0.1.0 audit completed, signing approach/prerequisites pending
+**Status:** Open; user selected free provenance stage, implementation reviewed/tested, native CI and first live main attestation pending
 **Priority:** P1
 **Evidence:** Published v0.1.0 Windows setup.exe has no embedded Authenticode signature; both DMGs are unsigned and their apps have ad-hoc signatures without Team ID. No stapled DMG ticket or verified GitHub build/release attestation was found. Published/current workflows have no publisher-signing/notarization/attestation steps; exact bytes and limits are recorded in the SEC-006 published release audit below.
 **Attack prerequisites:** Substitution of a download, mirror, message attachment, or distribution channel. A matching checksum obtained through the same compromised channel does not establish publisher identity.
@@ -369,6 +369,35 @@ The user explicitly requested leaving LAN HTTP/SOCKS/mixed access unchanged and 
 - Published DEB ar members: debian-binary, control.tar.zst, data.tar.zst; no embedded _gpg signature member. This does not claim that DEB format itself requires an embedded signature; authenticated repository/release metadata could provide the trust boundary instead.
 - gh attestation verify -R Arap919/Xkeen-installer failed for each exact installer digest with HTTP 404 for the SLSA build-provenance query. gh release verify v0.1.0 explicitly reports no attestations for that tag. No cryptographic build/release provenance was verified.
 - Reviewed workflow from the published tag and current feature branch: plain SHA256SUMS and release upload, no publisher signing/notarization/attestation steps. Repository Actions secrets list is empty; only secret names were queried, never values. This does not establish absence of developer certificates in external accounts or local keychains.
-- No release asset, tag, repository setting, signing credential, OS trust store or router was changed during audit. Workflow implementation awaits the user's signing approach/account prerequisites; SEC-006 remains open.
+- No release asset, tag, repository setting, signing credential, OS trust store or router was changed during audit. At that audit stage, implementation awaited the user's signing approach/account prerequisites; the subsequent free-stage decision is recorded below. SEC-006 remains open.
 
 SEC-006 independent audit review: the separate security specialist independently confirmed all saved release file sizes/digests and SHA256SUMS, Windows PE Security Directory=(0,0), the three DEB members and absence of signing/notarization/attestation steps in published/current workflows. Two stale published-assets evidence statements were corrected. MacOS/network/API results remain root's direct verification, not an independent repeat. No substantive issue with the qualified findings was identified. The specialist confirmed GitHub provenance is a possible first stage, not a replacement for the original Authenticode/Developer ID/notarization acceptance.
+
+## SEC-006 approved free provenance stage (2026-11-18)
+
+The user selected the free GitHub attestations stage. Native Authenticode,
+Developer ID and notarization are outside this selected implementation; the
+broader original finding must not be reported fully closed.
+
+- [x] Reproduce missing provenance permissions/pipeline in a failing workflow policy test.
+- [x] Prepare exactly four regular installer files and final SHA256SUMS before attestation.
+- [x] Use actions/attest v4 pinned to 1e69f48acb82d1966a394da916b4c1698aa569d6; attest all five final files.
+- [x] Grant OIDC/attestations write only to the release job on main for push/manual dispatch; all PR/build jobs stay read-only.
+- [x] Require successful verification of exact certificate workflow identity on main, source SHA and GitHub-hosted runner before publication; fail closed.
+- [x] Run functional release-script fixtures, full checks and separate security review; fix findings.
+- [ ] Document consumer verification and native CI evidence honestly.
+
+No main push, real release publication, repository setting change or live
+attestation issuance is authorized by implementing this branch. Existing v0.1.0
+assets remain unchanged. The main-only OIDC/release stage cannot be exercised by
+a feature-branch CI run; first live main release needs separate authorization.
+
+### SEC-006 free-stage implementation evidence (2026-11-18)
+
+- RED: workflow policy test failed for missing release signing permissions.
+- GREEN: full Go suite (eight packages) and production vet passed; workflow policy enforces trusted main/event context, minimal permissions, pinned action, final-subject coverage, correct ordering and no conditional/continue-on-error bypass.
+- Executed actual embedded preparation/verification scripts on harmless fixtures in an isolated --network none Python Linux image pinned to python@sha256:a5a7017efc5969e00ae2b91c8eb0631049a569652aa4ffc4501769049ae45c72. Valid exact manifests pass; missing/extra files, directories and symlinks fail. Verification argv binds expected certificate identity/main/source SHA/hosted runner, covers all five files; real checksum tampering stops before the mocked external gh boundary.
+- Fixture scope: gh is replaced only inside the isolated test to inspect argv/control flow. This does not prove cryptographic attestation issuance or provider availability. Initial image without Python failed the positive fixture and was not accepted as evidence; runtime dependencies were corrected.
+- Separate security specialist found one README accuracy issue (release attestation vs workflow artifact provenance); corrected and re-reviewed. No unresolved concrete workflow defect remained. Reviewer independently read source/API documentation; runtime results are root's executions.
+- README documents verification of downloaded files with exact workflow certificate identity and source commit, the absence of retroactive v0.1.0 provenance, and the distinction from native OS publisher signatures.
+- Native feature CI pending. Live OIDC/attestation and real release stay untested until a separately authorized main release. No published assets, main branch or repository settings changed.

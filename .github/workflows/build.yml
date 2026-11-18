@@ -208,11 +208,13 @@ jobs:
           retention-days: 7
 
   release:
-    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+    if: (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/main'
     needs: [version, build]
     runs-on: ubuntu-24.04
     permissions:
       contents: write
+      id-token: write
+      attestations: write
     env:
       GH_TOKEN: ${{ github.token }}
       RELEASE_TAG: ${{ needs.version.outputs.tag }}
@@ -225,12 +227,66 @@ jobs:
           pattern: xkeen-installer-*
           path: release
           merge-multiple: true
-      - name: Publish tag and release
+      - name: Prepare final release checksums
+        id: prepare-release
+        shell: python
+        run: |
+          import hashlib, os, pathlib, re
+          tag = os.environ["RELEASE_TAG"]
+          if not re.fullmatch(r"v[0-9]+\.[0-9]+\.[0-9]+", tag):
+              raise SystemExit("Invalid release tag")
+          version = tag[1:]
+          root = pathlib.Path("release")
+          expected = {f"xkeen-installer-{version}-{suffix}" for suffix in (
+              "windows-amd64-setup.exe", "linux-amd64.deb",
+              "macos-amd64.dmg", "macos-arm64.dmg")}
+          if root.is_symlink() or not root.is_dir():
+              raise SystemExit("Invalid release directory")
+          files = list(root.iterdir())
+          if {p.name for p in files} != expected:
+              raise SystemExit("Expected exactly the four final installers")
+          if any(p.is_symlink() or not p.is_file() for p in files):
+              raise SystemExit("Release payload must contain regular files only")
+          lines = []
+          for path in sorted(files):
+              digest = hashlib.sha256()
+              with path.open("rb") as source:
+                  for chunk in iter(lambda: source.read(1 << 20), b""):
+                      digest.update(chunk)
+              lines.append(f"{digest.hexdigest()}  {path.name}\n")
+          with (root / "SHA256SUMS").open("x", encoding="ascii", newline="\n") as output:
+              output.writelines(lines)
+      - name: Attest final release bytes
+        id: attest-release
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4
+        with:
+          subject-path: release/*
+          create-storage-record: false
+      - name: Verify final release provenance
+        id: verify-release
         shell: bash
         run: |
           set -euo pipefail
-          test "$(find release -type f | wc -l)" -eq 4
-          (cd release && sha256sum * > SHA256SUMS)
+          (cd release && sha256sum --check SHA256SUMS)
+          identity="https://github.com/$GITHUB_REPOSITORY/.github/workflows/build.yml@refs/heads/main"
+          for artifact in release/*; do
+            verified=false
+            for attempt in 1 2 3; do
+              if gh attestation verify "$artifact" --repo "$GITHUB_REPOSITORY" \
+                --cert-identity "$identity" --source-digest "$GITHUB_SHA" \
+                --deny-self-hosted-runners; then
+                verified=true
+                break
+              fi
+              if [ "$attempt" -lt 3 ]; then sleep 5; fi
+            done
+            test "$verified" = true
+          done
+      - name: Publish tag and release
+        id: publish-release
+        shell: bash
+        run: |
+          set -euo pipefail
           if git rev-parse "refs/tags/$RELEASE_TAG" >/dev/null 2>&1; then
             test "$(git rev-list -n 1 "$RELEASE_TAG")" = "$GITHUB_SHA"
           else
