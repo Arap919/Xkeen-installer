@@ -129,7 +129,7 @@ function planMessage(error:unknown):string{
 
 export interface Backend{
  DiscoverBootstrap?(c:Connection):Promise<BootstrapDiscovery>;
- PrepareBootstrap?(uuid:string):Promise<BootstrapPlan>;
+ PrepareBootstrap?(uuid:string,password:string,repeat:string):Promise<BootstrapPlan>;
  StartBootstrap?(id:string,reviewed:boolean):Promise<void>;
  Inspect(c:Connection):Promise<Inspection>;
  ConfirmHostKey(address:string,fingerprint:string):Promise<void>;
@@ -146,7 +146,7 @@ export interface Backend{
 }
 
 export class Wizard{
- mode:'new'|'existing'='existing';bootstrap:BootstrapDiscovery|null=null;bootstrapPlan:BootstrapPlan|null=null;bootstrapUUID='';bootstrapReviewed=false;bootstrapWaiting=false;
+ mode:'new'|'existing'='existing';bootstrap:BootstrapDiscovery|null=null;bootstrapPlan:BootstrapPlan|null=null;bootstrapUUID='';bootstrapPassword='';bootstrapPasswordRepeat='';bootstrapReviewed=false;bootstrapWaiting=false;
  completionBusy=false;private completionStarted=false;
  step=0;prepared=false;busy=false;running=false;reviewed=false;message='';
  connection:Connection={Host:'192.168.1.1',Port:222,User:'root',Password:''};
@@ -163,7 +163,7 @@ export class Wizard{
    return;
   }
   if(this.mode==='new'&&event.Status==='running'){
-   const order=['reinspect','download','transfer','trigger','waiting-shell'];
+   const order=['reinspect','download','transfer','credential-transfer','credential-check','trigger','waiting-shell'];
    const next=order.indexOf(event.Step);
    if(next>=0){
     const latest=Math.max(-1,...this.progress.map(stage=>order.indexOf(stage.Step)));
@@ -181,9 +181,9 @@ export class Wizard{
 
  constructor(readonly backend:Backend){}
  setMode(mode:'new'|'existing'){this.mode=mode;this.connection.Port=mode==='new'?22:222;this.connection.User=mode==='new'?'admin':'root';this.connection.Password='';this.connectionChanged();this.bootstrapWaiting=false;}
- connectionChanged(){this.inspection=null;this.plan=null;this.reviewed=false;this.hostKey=null;this.bootstrap=null;this.bootstrapPlan=null;this.bootstrapReviewed=false;this.bootstrapUUID='';}
+ connectionChanged(){this.clearBootstrapPasswords();this.inspection=null;this.plan=null;this.reviewed=false;this.hostKey=null;this.bootstrap=null;this.bootstrapPlan=null;this.bootstrapReviewed=false;this.bootstrapUUID='';}
  clearSubscriptions(){this.selection.ProviderURL='';this.selection.MihomoProviderURLs=[];this.selection.XrayProviderURLs=[];}
- clearSensitiveInputs(){this.connection.Password='';this.selection.ImportText='';this.clearSubscriptions();}
+ clearSensitiveInputs(){this.clearBootstrapPasswords();this.connection.Password='';this.selection.ImportText='';this.clearSubscriptions();}
  selectionChanged(){this.plan=null;this.reviewed=false;this.selection.ProviderURL='';if(!this.selection.Cores.includes('mihomo'))this.selection.MihomoProviderURLs=[];if(!this.selection.Cores.includes('xray'))this.selection.XrayProviderURLs=[];}
  next(){if(this.busy||this.running||this.step===0&&!this.prepared||this.step===1&&!this.inspection||this.step===2&&!this.inspection?.Entware||this.step>=5)return false;this.step++;return true;}
  async inspect(){
@@ -199,9 +199,22 @@ export class Wizard{
   finally{this.busy=false;}
  }
  async confirmHost(){if(this.hostKey?.Kind!=='first-use')return;await this.backend.ConfirmHostKey(this.hostKey.Address,this.hostKey.Fingerprint);this.hostKey=null;await this.inspect();}
- async prepareBootstrap(){if(this.busy||this.running||!this.bootstrap||!this.bootstrapUUID)return;this.busy=true;this.bootstrapReviewed=false;this.message='';try{if(!this.backend.PrepareBootstrap)throw new Error();this.bootstrapPlan=await this.backend.PrepareBootstrap(this.bootstrapUUID);}catch{this.bootstrapPlan=null;this.message='План Entware заблокирован. Нужен корневой SMB-ресурс EXT4, свободное место и отсутствие существующего Entware, другого OPKG-диска, чужого архива или пользовательского initrc.';}finally{this.busy=false;}}
+ private clearBootstrapPasswords(){this.bootstrapPassword='';this.bootstrapPasswordRepeat='';}
+ bootstrapPasswordChanged(){this.bootstrapPlan=null;this.bootstrapReviewed=false;}
+ async prepareBootstrap(){
+  if(this.busy||this.running||!this.bootstrap||!this.bootstrapUUID)return;
+  this.busy=true;this.bootstrapPlan=null;this.bootstrapReviewed=false;this.message='';
+  try{
+   const password=this.bootstrapPassword,repeat=this.bootstrapPasswordRepeat;
+   const invalidUnicode=[...password].some(character=>{const point=character.codePointAt(0)!;return point>=0xd800&&point<=0xdfff;});
+   if(password!==repeat||[...password].length<16||new TextEncoder().encode(password).length>1024||/[\0\r\n]/.test(password)||invalidUnicode){this.message='Пароли должны совпадать: минимум 16 символов, максимум 1024 байта UTF-8, без NUL и переводов строк.';return;}
+   if(!this.backend.PrepareBootstrap)throw new Error();
+   this.bootstrapPlan=await this.backend.PrepareBootstrap(this.bootstrapUUID,password,repeat);
+  }catch{this.bootstrapPlan=null;this.message='План Entware заблокирован. Нужен корневой SMB-ресурс EXT4, свободное место и отсутствие существующего Entware, другого OPKG-диска, чужого архива или пользовательского initrc.';}
+  finally{this.clearBootstrapPasswords();this.busy=false;}
+ }
  async startBootstrap(){if(this.busy||this.running||!this.bootstrapReviewed||!this.bootstrapPlan?.ID)return;this.resetProgress();this.busy=true;this.running=true;this.message='';try{if(!this.backend.StartBootstrap)throw new Error();await this.backend.StartBootstrap(this.bootstrapPlan.ID,true);this.connection.Password='';this.bootstrapPlan=null;this.bootstrapReviewed=false;}catch{this.running=false;this.bootstrapPlan=null;this.bootstrapReviewed=false;this.message='Запуск Entware заблокирован. Повторите проверку и подготовьте новый план.';}finally{this.busy=false;}}
- async finishBootstrap(){this.result=await this.backend.GetResult();this.running=false;this.bootstrapWaiting=true;this.connection.Password='';this.bootstrapPlan=null;this.bootstrapReviewed=false;this.message=this.result.Message;this.step=2;}
+ async finishBootstrap(){this.clearBootstrapPasswords();this.result=await this.backend.GetResult();this.running=false;this.bootstrapWaiting=true;this.connection.Password='';this.bootstrapPlan=null;this.bootstrapReviewed=false;this.message=this.result.Message;this.step=2;}
  connectShell(){const host=this.connection.Host;this.setMode('existing');this.connection.Host=host;this.step=1;this.message='Дождитесь завершения OPKG, проверьте Initrc /opt/etc/init.d/rc.unslung в KeeneticOS и укажите текущие данные SSH Entware. Новый SSH-ключ подтверждается отдельно.';}
  async prepare(){
   if(this.busy||this.running||!this.inspection)return;this.busy=true;this.reviewed=false;this.message='';

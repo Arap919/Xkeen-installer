@@ -6,7 +6,7 @@ Snapshot: 2026-11-04. These are download and adapter contracts, not a claim of t
 
 `internal/catalog` is dependency-free and offline. `Component` values are `Entware`, `XKeen`, `Mihomo`, `Xray`, `UI`, `Watchdog`. `RouterArch` values are `ARM64` (`arm64`), `MIPSel` (`mipsel`), `MIPS` (`mips`). Detection and parsing of router output belong to the later discovery layer; substring matching of unknown architectures is forbidden here. Shared/all payloads still retain the requested router architecture in the returned contract.
 
-`Resolve(component, arch) (Artifact, error)` returns the reviewed default. `ResolveVersion(component, arch, version)` permits only the exact reviewed version; it does not invent arbitrary release URLs or follow `latest`. `Artifact` has `Component`, `Arch`, `Version`, `URL`, `Size` and `Integrity { SHA256, Source }`. `Size=0` and an empty digest mean upstream verification is unavailable, not successful. `Verify(artifact, io.Reader)` first rejects any metadata change against the canonical snapshot, then checks download size and SHA256 while streaming at most expected size + 1 bytes. Read errors are preserved. It performs no installation, extraction, HTTP requests or router mutations. `ErrIntegrityUnavailable` is returned for Entware. A digest published by the same upstream proves consistency, not independent publisher authentication or executable architecture.
+`Resolve(component, arch) (Artifact, error)` returns the reviewed default. `ResolveVersion(component, arch, version)` permits only the exact reviewed version; it does not invent arbitrary release URLs or follow `latest`. `Artifact` has `Component`, `Arch`, `Version`, `URL`, `Size` and `Integrity { SHA256, Source }`. `Size=0` and an empty digest mean upstream verification is unavailable, not successful. `Verify(artifact, io.Reader)` first rejects any metadata change against the canonical snapshot, then checks download size and SHA256 while streaming at most expected size + 1 bytes. Read errors are preserved. It performs no installation, extraction, HTTP requests or router mutations. Entware now verifies installer-derived offline bundle pins; see `docs/entware-byte-pins.md` for the superseding SEC-001 snapshot. A digest published by the same upstream proves consistency, not independent publisher authentication or executable architecture.
 
 | Component | Reviewed version | ARM64 asset | MIPSel asset | MIPS asset |
 | --- | --- | --- | --- | --- |
@@ -15,13 +15,15 @@ Snapshot: 2026-11-04. These are download and adapter contracts, not a claim of t
 | Xray | `v26.10.31` | `Xray-linux-arm64-v8a.zip` | `Xray-linux-mips32le.zip` | `Xray-linux-mips32.zip` |
 | UI | `v1.4.2+pwa.1` | `xkeen-ui-arm64-v8a` | `xkeen-ui-mips32le` | `xkeen-ui-mips32` |
 | Watchdog | `1.0.16-1` | `router-watchdog_1.0.16-1_all.ipk` | same | same |
-| Entware | explicitly `unversioned` | `aarch64-installer.tar.gz` | `mipsel-installer.tar.gz` | `mips-installer.tar.gz` |
+| Entware | `offline-2026-11-16` | bundled `arm64.tar.gz` | bundled `mipsel.tar.gz` | bundled `mips.tar.gz` |
 
 Published sizes/digests were read from the actual primary [XKeen release API](https://api.github.com/repos/jameszeroX/XKeen/releases/tags/2.1), [Mihomo release API](https://api.github.com/repos/MetaCubeX/mihomo/releases/tags/v1.19.33), [Xray release API](https://api.github.com/repos/XTLS/Xray-core/releases/tags/v26.10.31), [UI release API](https://api.github.com/repos/Arap919/xkeen-ui-pwa-fork/releases/tags/v1.4.2%2Bpwa.1) and [watchdog feed manifest](https://arap919.github.io/router-watchdog/update.json). GitHub API rate limiting affected some anonymous requests; XKeen metadata was subsequently read through the connected GitHub tool. UI tag `+` is encoded as `%2B` in download URLs. No mirror is silently substituted.
 
 ## Entware bootstrap and manual gate
 
-Official upstream archives inspected directly, without extraction or execution:
+The following are original upstream inputs, not the current shipped archive bytes. The SEC-001 offline derivative, package closure, transformation and final pins are specified in `docs/entware-byte-pins.md`.
+
+Official upstream source archives inspected directly:
 
 - [ARM64](https://bin.entware.net/aarch64-k3.10/installer/aarch64-installer.tar.gz): 3,232,671 bytes.
 - [MIPSel](https://bin.entware.net/mipselsf-k3.4/installer/mipsel-installer.tar.gz): 3,304,180 bytes.

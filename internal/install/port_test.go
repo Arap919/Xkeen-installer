@@ -41,7 +41,7 @@ func TestUIPortAppearingAfterPlanStopsBeforeBackup(t *testing.T) {
 		t.Fatalf("late conflict: err=%v writes=%d", err, f.writes)
 	}
 	for _, cmd := range f.commands {
-		if strings.HasPrefix(cmd, "/opt/bin/opkg update") {
+		if strings.Contains(cmd, "/opt/bin/opkg") && strings.Contains(cmd, " update") {
 			t.Fatal("package mutation before gate")
 		}
 	}

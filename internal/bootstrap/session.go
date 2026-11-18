@@ -16,6 +16,8 @@ type CLI interface {
 type Store interface {
 	Check(context.Context, Volume, catalog.Artifact) error
 	Publish(context.Context, Volume, catalog.Artifact, []byte) error
+	PublishCredential(context.Context, Volume, catalog.Artifact, []byte) error
+	CheckCredential(context.Context, Volume, catalog.Artifact, []byte) error
 }
 type Plan struct {
 	ID              string
@@ -31,13 +33,14 @@ type Plan struct {
 	IntegritySource string
 }
 type Session struct {
-	mu       sync.Mutex
-	cli      CLI
-	store    Store
-	plan     Plan
-	snapshot Snapshot
-	prepared time.Time
-	download func(context.Context, catalog.Artifact) ([]byte, error)
+	mu         sync.Mutex
+	cli        CLI
+	store      Store
+	plan       Plan
+	credential []byte
+	snapshot   Snapshot
+	prepared   time.Time
+	download   func(context.Context, catalog.Artifact) ([]byte, error)
 }
 
 var ErrTriggerUncertain = errors.New("firmware trigger may have executed; inspect before retry")
@@ -73,10 +76,15 @@ func Inspect(ctx context.Context, cli CLI) (Snapshot, error) {
 	}
 	return s, nil
 }
-func (s *Session) Prepare(ctx context.Context, uuid string) (Plan, error) {
+func (s *Session) Prepare(ctx context.Context, uuid, password, repeat string) (Plan, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.plan = Plan{}
+	clear(s.credential)
+	s.credential = nil
+	if e := ValidatePassword(password, repeat); e != nil {
+		return Plan{}, e
+	}
 	snap, e := Inspect(ctx, s.cli)
 	if e != nil {
 		return Plan{}, e
@@ -102,13 +110,26 @@ func (s *Session) Prepare(ctx context.Context, uuid string) (Plan, error) {
 	}
 	commands = append(commands, "opkg initrc /opt/etc/init.d", "opkg disk "+v.UUID+":/")
 	s.plan = Plan{ID: hex.EncodeToString(id[:]), Model: snap.Model, Hardware: snap.Hardware, Arch: snap.Arch, Volume: v, Archive: archiveName(a.Arch), URL: a.URL, SHA256: a.Integrity.SHA256, Size: a.Size, Commands: commands, IntegritySource: a.Integrity.Source}
+	hash, e := NewPasswordHash(password, repeat)
+	password = ""
+	repeat = ""
+	if e != nil {
+		s.plan = Plan{}
+		return Plan{}, e
+	}
+	s.credential, e = makeCredential(s.plan.ID, v, a, hash)
+	hash = ""
+	if e != nil {
+		s.plan = Plan{}
+		return Plan{}, e
+	}
 	s.snapshot = snap
 	s.prepared = time.Now()
 	return s.plan, nil
 }
 
 // KeeneticOS documents native processing of *.tgz. This changes only the
-// destination filename; official HTTPS .tar.gz bytes and their digest stay intact.
+// destination filename; reviewed offline bundle bytes and their digest stay intact.
 func archiveName(arch catalog.RouterArch) string {
 	if arch == catalog.ARM64 {
 		return "aarch64-installer.tgz"
@@ -133,7 +154,13 @@ func (s *Session) Start(ctx context.Context, id string, reviewed bool, progress 
 		return ErrUnsafe
 	}
 	p := s.plan
-	s.plan = Plan{} // Attempt consumes the plan, including cancellation/failure.
+	s.plan = Plan{} // Every reviewed attempt consumes its approval, including invalid private state.
+	credential := s.credential
+	s.credential = nil
+	defer clear(credential)
+	if !validCredentialPayload(credential) {
+		return ErrUnsafe
+	}
 	currentStage := "reinspect"
 	defer func() {
 		if failure != nil {
@@ -181,6 +208,10 @@ func (s *Session) Start(ctx context.Context, id string, reviewed bool, progress 
 	if ctx.Err() != nil {
 		return ctx.Err()
 	}
+	stage("credential-transfer")
+	if e = s.store.PublishCredential(ctx, p.Volume, a, credential); e != nil {
+		return e
+	}
 	stage("post-transfer-inspect")
 	if e = s.recheck(ctx, p); e != nil {
 		return e
@@ -188,6 +219,10 @@ func (s *Session) Start(ctx context.Context, id string, reviewed bool, progress 
 	stage("post-transfer-store-check")
 	if e = s.store.Check(ctx, p.Volume, a); e != nil {
 		return ErrUnsafe
+	}
+	stage("credential-check")
+	if e = s.store.CheckCredential(ctx, p.Volume, a, credential); e != nil {
+		return e
 	}
 	stage("trigger")
 	for _, command := range p.Commands {

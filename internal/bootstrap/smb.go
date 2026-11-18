@@ -211,7 +211,7 @@ func (s *smbStore) Publish(ctx context.Context, v Volume, a catalog.Artifact, b 
 	return s.operation(ctx, v, a, func(d bootstrapDisk) error { return publishDisk(d, a, b) })
 }
 func verifyReadback(a catalog.Artifact, r io.Reader) error {
-	if a.Size <= 0 || a.Size > 16<<20 || len(a.Integrity.SHA256) != 64 {
+	if a.Size <= 0 || a.Size > 64<<20 || len(a.Integrity.SHA256) != 64 {
 		return errSMB
 	}
 	h := sha256.New()

@@ -136,8 +136,9 @@ func elfHeader(arch catalog.RouterArch, b []byte) bool {
 	return false
 }
 
-// Official reviewed bytes are bundled so initial setup does not depend on the
-// Entware download server. Catalog pins and archive safety checks remain mandatory.
+// Reviewed offline bundles include all bootstrap and installer package dependencies.
+// Source pins and the deterministic locales hook transformation are documented in
+// docs/entware-byte-pins.md. Catalog and archive safety checks remain mandatory.
 //
 //go:embed archives/*.tar.gz
 var bundledArchives embed.FS

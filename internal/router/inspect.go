@@ -19,7 +19,7 @@ const endianProbe = "dd if=/bin/sh bs=1 count=6 2>/dev/null | od -b"
 const activeCoreProbe = "ps w"
 const versionProbe = "/opt/bin/opkg list-installed"
 
-var inventoryRoots = []string{"/opt/etc/xkeen-subscriptions", "/opt/libexec/xkeen-subscriptions", "/opt/etc/cron.d", "/opt/etc/xkeen", "/opt/etc/xray", "/opt/etc/mihomo", "/opt/etc/xkeen-ui", "/opt/etc/nginx/ssl", "/opt/etc/lighttpd/conf.d/90-xkeenui.conf", "/opt/etc/router-watchdog.json", "/opt/etc/router-watchdog.json-old", "/opt/etc/router-watchdog.json-upgrade", "/opt/etc/crontab", "/opt/etc/cron.1min", "/opt/etc/init.d", "/opt/share/www/XKeen-UI", "/opt/var/spool/cron", "/opt/lib/opkg/status", "/opt/etc/ndm/netfilter.d/proxy.sh", "/opt/etc/ndm/schedule.d/00-xkeen-hotspot-sync.sh"}
+var inventoryRoots = []string{"/opt/etc/opkg.conf", "/opt/etc/opkg", "/opt/lib/functions.sh", "/opt/etc/xkeen-subscriptions", "/opt/libexec/xkeen-subscriptions", "/opt/etc/cron.d", "/opt/etc/xkeen", "/opt/etc/xray", "/opt/etc/mihomo", "/opt/etc/xkeen-ui", "/opt/etc/nginx/ssl", "/opt/etc/lighttpd/conf.d/90-xkeenui.conf", "/opt/etc/router-watchdog.json", "/opt/etc/router-watchdog.json-old", "/opt/etc/router-watchdog.json-upgrade", "/opt/etc/crontab", "/opt/etc/cron.1min", "/opt/etc/init.d", "/opt/share/www/XKeen-UI", "/opt/var/spool/cron", "/opt/lib/opkg/status", "/opt/etc/ndm/netfilter.d/proxy.sh", "/opt/etc/ndm/schedule.d/00-xkeen-hotspot-sync.sh"}
 
 const maxInventoryBytes = int64(64 << 20)
 const maxInventoryEntries = 10000

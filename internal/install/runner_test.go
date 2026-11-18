@@ -30,7 +30,7 @@ type fakeRouter struct {
 }
 
 func fixture() *fakeRouter {
-	return &fakeRouter{files: map[string][]byte{"/opt/bin/opkg": []byte("opkg"), config.XrayPath: []byte(validXray), "/opt/etc/init.d/S05xkeen": []byte("#!/bin/sh\nname_client=\"xray\"\nproxy_start() { :; }\nproxy_stop() { :; }\ncase \"$1\" in esac\n"), "/opt/etc/xkeen/xkeen-ui.json": []byte("private-secret"), "/opt/etc/xkeen/watchdog-push.json": []byte("vapid-secret")}, modes: map[string]fs.FileMode{}, active: "xray", packages: "opkg - 1\n"}
+	return &fakeRouter{files: map[string][]byte{"/opt/lib/opkg/status": []byte("Package: opkg\nVersion: 1\nStatus: install user installed\n\n"), "/opt/etc/opkg.conf": []byte("src/gz entware https://bin.entware.net/aarch64-k3.10\n"), "/opt/bin/opkg": []byte("opkg"), config.XrayPath: []byte(validXray), "/opt/etc/init.d/S05xkeen": []byte("#!/bin/sh\nname_client=\"xray\"\nproxy_start() { :; }\nproxy_stop() { :; }\ncase \"$1\" in esac\n"), "/opt/etc/xkeen/xkeen-ui.json": []byte("private-secret"), "/opt/etc/xkeen/watchdog-push.json": []byte("vapid-secret")}, modes: map[string]fs.FileMode{}, active: "xray", packages: "opkg - 1\n"}
 }
 func (f *fakeRouter) Run(ctx context.Context, c string) (router.Result, error) {
 	if e := ctx.Err(); e != nil {
@@ -61,7 +61,7 @@ func (f *fakeRouter) Run(ctx context.Context, c string) (router.Result, error) {
 	if strings.Contains(c, f.fail) && f.fail != "" {
 		return router.Result{Stderr: []byte("secret-provider-url")}, errors.New("password=secret")
 	}
-	if strings.HasPrefix(c, "/opt/bin/opkg install '") && strings.Contains(c, "router-watchdog_1.0.16-1_all.ipk") {
+	if strings.Contains(c, " install '") && strings.Contains(c, "/opt/bin/opkg --conf ") && strings.Contains(c, "router-watchdog_1.0.16-1_all.ipk") {
 		f.packages += "router-watchdog - 1.0.16-1\n"
 		f.files[config.WatchdogPath] = append(f.files[config.WatchdogPath], ' ')
 	}
@@ -433,7 +433,7 @@ func TestDownloadFailureAndBackupFailureStopMutations(t *testing.T) {
 		t.Fatal(r, e)
 	}
 	for _, c := range f.commands {
-		if strings.Contains(c, "opkg install") || strings.Contains(c, " stop") {
+		if (strings.Contains(c, "/opt/bin/opkg") && strings.Contains(c, " install ")) || strings.Contains(c, " stop") {
 			t.Fatal("mutation after failed backup")
 		}
 	}

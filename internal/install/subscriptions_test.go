@@ -28,7 +28,7 @@ func TestCronFreshInstallAndBackupOrdering(t *testing.T) {
 	}
 	backup, dep, start, verify := -1, -1, -1, -1
 	for i, c := range f.commands {
-		if strings.Contains(c, "opkg install") {
+		if strings.Contains(c, "/opt/bin/opkg") && strings.Contains(c, " install ") {
 			dep = i
 		}
 		if strings.Contains(c, "S10cron start") {

@@ -1,0 +1,43 @@
+name: Prepare Entware security fixtures
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [feature/installer]
+    paths:
+      - scripts/entware_bundle.py
+      - scripts/test_entware_bundle.py
+      - .github/workflows/entware-fixtures.yml
+
+permissions:
+  contents: read
+
+jobs:
+  prepare:
+    name: entware-${{ matrix.arch }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        arch: [arm64, mips, mipsel]
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+      - name: Test offline repository preparation
+        run: python3 -m unittest discover -s scripts -p test_entware_bundle.py
+      - name: Resolve candidate and fetch authenticated fixture bytes
+        env:
+          ROUTER_ARCH: ${{ matrix.arch }}
+        run: |
+          mkdir fixtures
+          python3 scripts/entware_bundle.py resolve "$ROUTER_ARCH" "fixtures/$ROUTER_ARCH-candidate-lock.json" --index-dir fixtures/indexes
+          python3 scripts/entware_bundle.py fetch "fixtures/$ROUTER_ARCH-candidate-lock.json" fixtures/repository
+      - if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: entware-candidate-${{ matrix.arch }}
+          path: fixtures/
+          if-no-files-found: error
+          retention-days: 7

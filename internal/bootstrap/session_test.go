@@ -39,9 +39,10 @@ func (c *fixtureCLI) RunCLI(ctx context.Context, command string) ([]byte, error)
 }
 
 type fixtureStore struct {
-	published    int
-	checks       int
-	afterPublish func()
+	published         int
+	credentialFailure bool
+	checks            int
+	afterPublish      func()
 }
 
 func (s *fixtureStore) Check(context.Context, Volume, catalog.Artifact) error { s.checks++; return nil }
@@ -57,7 +58,7 @@ func TestReviewedBootstrapOneShotAndLateDiskCheck(t *testing.T) {
 	c := &fixtureCLI{config: "cifs share ENTWARE 12345678-abcd-1234-abcd-123456789abc:/", media: mediaFixture}
 	store := &fixtureStore{}
 	s := NewSession(c, store)
-	p, err := s.Prepare(ctx, "")
+	p, err := s.Prepare(ctx, "", "Fixture-password-2026!", "Fixture-password-2026!")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -83,7 +84,7 @@ func TestBootstrapStopsOnVolumeChangeAfterTransferAndCancellation(t *testing.T) 
 			s.download = func(context.Context, catalog.Artifact) ([]byte, error) {
 				return []byte("fixture download boundary"), nil
 			}
-			p, e := s.Prepare(ctx, "")
+			p, e := s.Prepare(ctx, "", "Fixture-password-2026!", "Fixture-password-2026!")
 			if e != nil {
 				t.Fatal(e)
 			}
@@ -109,7 +110,7 @@ func TestBootstrapStopsOnVolumeChangeAfterTransferAndCancellation(t *testing.T) 
 func TestBootstrapSelectedSameDiskShowsDetachAndRebind(t *testing.T) {
 	c := &fixtureCLI{config: "cifs share ENTWARE 12345678-abcd-1234-abcd-123456789abc:/\nopkg disk 12345678-abcd-1234-abcd-123456789abc:/", media: mediaFixture}
 	s := NewSession(c, &fixtureStore{})
-	p, e := s.Prepare(context.Background(), "")
+	p, e := s.Prepare(context.Background(), "", "Fixture-password-2026!", "Fixture-password-2026!")
 	if e != nil {
 		t.Fatal(e)
 	}
@@ -127,7 +128,7 @@ func TestBootstrapFailureRetainsExactStage(t *testing.T) {
 	c := &fixtureCLI{config: "cifs share ENTWARE 12345678-abcd-1234-abcd-123456789abc:/", media: mediaFixture}
 	s := NewSession(c, &failingPublishStore{})
 	s.download = func(context.Context, catalog.Artifact) ([]byte, error) { return []byte("fixture"), nil }
-	p, e := s.Prepare(context.Background(), "")
+	p, e := s.Prepare(context.Background(), "", "Fixture-password-2026!", "Fixture-password-2026!")
 	if e != nil {
 		t.Fatal(e)
 	}
@@ -142,4 +143,14 @@ func TestBootstrapFailureRetainsExactStage(t *testing.T) {
 	if c.writes != 0 {
 		t.Fatal("triggered OPKG after failed transfer")
 	}
+}
+
+func (s *fixtureStore) PublishCredential(context.Context, Volume, catalog.Artifact, []byte) error {
+	if s.credentialFailure {
+		return errors.New("credential publication failed")
+	}
+	return nil
+}
+func (s *fixtureStore) CheckCredential(context.Context, Volume, catalog.Artifact, []byte) error {
+	return nil
 }

@@ -11,7 +11,7 @@ const bootstrapMedia = "media:\n name: Media0\n serial: SERIAL1\n port: 1\n part
 func TestBootstrapReviewsRequiredTemporaryInitrcAndFinalGate(t *testing.T) {
 	c := &fixtureCLI{media: bootstrapMedia, config: "cifs share ENTWARE 12345678-abcd-1234-abcd-123456789abc:/"}
 	s := NewSession(c, &fixtureStore{})
-	p, e := s.Prepare(context.Background(), "")
+	p, e := s.Prepare(context.Background(), "", "Fixture-password-2026!", "Fixture-password-2026!")
 	if e != nil {
 		t.Fatal(e)
 	}

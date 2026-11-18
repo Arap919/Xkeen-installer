@@ -22,7 +22,7 @@ export function GetResult():Promise<main.ResultView>;
 
 export function Inspect(arg1:main.ConnectionRequest):Promise<main.InspectionView>;
 
-export function PrepareBootstrap(arg1:string):Promise<bootstrap.Plan>;
+export function PrepareBootstrap(arg1:string,arg2:string,arg3:string):Promise<bootstrap.Plan>;
 
 export function PreparePlan(arg1:main.PlanRequest):Promise<main.PlanView>;
 
