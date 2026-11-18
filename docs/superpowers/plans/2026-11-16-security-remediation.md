@@ -149,7 +149,7 @@ P1 means address or explicitly resolve before broad distribution. P2 means a con
 
 ### SEC-006: Establish publisher authenticity for distributed installers
 
-**Status:** Open; user selected free provenance stage, implementation reviewed/tested, native CI and first live main attestation pending
+**Status:** Partial; approved free provenance configuration reviewed and native CI passed; first live main attestation pending authorization, native OS signatures outside selected scope
 **Priority:** P1
 **Evidence:** Published v0.1.0 Windows setup.exe has no embedded Authenticode signature; both DMGs are unsigned and their apps have ad-hoc signatures without Team ID. No stapled DMG ticket or verified GitHub build/release attestation was found. Published/current workflows have no publisher-signing/notarization/attestation steps; exact bytes and limits are recorded in the SEC-006 published release audit below.
 **Attack prerequisites:** Substitution of a download, mirror, message attachment, or distribution channel. A matching checksum obtained through the same compromised channel does not establish publisher identity.
@@ -385,7 +385,7 @@ broader original finding must not be reported fully closed.
 - [x] Grant OIDC/attestations write only to the release job on main for push/manual dispatch; all PR/build jobs stay read-only.
 - [x] Require successful verification of exact certificate workflow identity on main, source SHA and GitHub-hosted runner before publication; fail closed.
 - [x] Run functional release-script fixtures, full checks and separate security review; fix findings.
-- [ ] Document consumer verification and native CI evidence honestly.
+- [x] Document consumer verification and native CI evidence honestly.
 
 No main push, real release publication, repository setting change or live
 attestation issuance is authorized by implementing this branch. Existing v0.1.0
@@ -401,3 +401,12 @@ a feature-branch CI run; first live main release needs separate authorization.
 - Separate security specialist found one README accuracy issue (release attestation vs workflow artifact provenance); corrected and re-reviewed. No unresolved concrete workflow defect remained. Reviewer independently read source/API documentation; runtime results are root's executions.
 - README documents verification of downloaded files with exact workflow certificate identity and source commit, the absence of retroactive v0.1.0 provenance, and the distinction from native OS publisher signatures.
 - Native feature CI pending. Live OIDC/attestation and real release stay untested until a separately authorized main release. No published assets, main branch or repository settings changed.
+
+### SEC-006 free-stage native CI and activation boundary (2026-11-18)
+
+- Implementation commit 26b7b849219d3a8f47604350c1e31bcfb3acb624 pushed to feature/installer. CI run https://github.com/Arap919/Xkeen-installer/actions/runs/44339105913 completed successfully on the exact SHA.
+- Native jobs: macOS AMD64 134924014927, Linux AMD64 134924014971, macOS ARM64 134924015031, Windows AMD64 134924015181. Root read logs: all source/binary vulnerability scans clean, expected production tags, 63 frontend tests and native Go tests/vet/build/package uploads passed.
+- Release job 134932336222 skipped as required for feature/installer. No live OIDC certificate, artifact attestation, tag or release was created by this verification. Linux functional scripts and all-platform structural security checks passed; these are not a substitute for the first real main signing/verification run.
+- Separate specialist's final read-only re-review found no unresolved concrete defect after the README correction. Native CI/runtime evidence is root's verification; reviewer did not independently execute it.
+- Refreshed origin/main; it is an ancestor of the implementation branch (no divergent main commits). No merge/push into main performed. Main push would automatically run the full build and publication workflow and therefore requires the user's separate approval.
+- Free-stage configuration is ready, activation/live cryptographic verification pending. Original SEC-006 remains partial because Authenticode, Developer ID and notarization were not selected. Published v0.1.0 remains unchanged and unsigned as audited.
