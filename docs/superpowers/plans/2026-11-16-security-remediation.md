@@ -42,7 +42,7 @@ Local binaries were dated November 9 and are not evidence of the exact current p
 | SEC-003 | P2 | PATH lookup confirmed; exploitation requires a writable earlier PATH entry | Desktop process execution | Trust installation resolves Windows/Linux utilities through PATH. |
 | SEC-004 | P2 | Generated configuration exposure confirmed; actual reachability untested | LAN to router proxy | New Mihomo configuration enables unauthenticated HTTP/SOCKS/mixed proxy ports on wildcard interfaces. |
 | SEC-005 | P1 / release blocker | Toolchain version and scanner output confirmed; individual exploitability mixed | Untrusted input to desktop runtime | CI and a local Windows binary use Go 1.26.3 with known standard-library advisories. |
-| SEC-006 | P1 / distribution gate | Local artifact signature status and missing CI signing steps confirmed; current published artifacts unverified | Distribution to desktop execution | Installer provenance is not established by publisher signatures in the inspected release process. |
+| SEC-006 | P1 / distribution gate | Published v0.1.0 outer installer signature status checked; no publisher identity or release provenance verified | Distribution to desktop execution | Installer provenance is not established by publisher signatures in the inspected release process. |
 | SEC-007 | P1 / verification gate | Bootstrap behavior confirmed; effective post-install credentials unverified | Network to router SSH | New Entware bootstrap starts SSH and advertises a default root password; the wizard does not enforce changing it. |
 
 P1 means address or explicitly resolve before broad distribution. P2 means a conditional or narrower security problem; priority does not assert a remotely exploitable desktop vulnerability. SEC-002 and SEC-006 include architectural/distribution risks, rather than a demonstrated code exploit.
@@ -149,13 +149,13 @@ P1 means address or explicitly resolve before broad distribution. P2 means a con
 
 ### SEC-006: Establish publisher authenticity for distributed installers
 
-**Status:** Open
+**Status:** Open; published v0.1.0 audit completed, signing approach/prerequisites pending
 **Priority:** P1
-**Evidence:** Inspected local Windows EXE has no embedded Authenticode signature; macOS app has only an ad-hoc signature; `.github/workflows/build.yml` has no publisher-signing/notarization steps. Current published assets were not checked.
+**Evidence:** Published v0.1.0 Windows setup.exe has no embedded Authenticode signature; both DMGs are unsigned and their apps have ad-hoc signatures without Team ID. No stapled DMG ticket or verified GitHub build/release attestation was found. Published/current workflows have no publisher-signing/notarization/attestation steps; exact bytes and limits are recorded in the SEC-006 published release audit below.
 **Attack prerequisites:** Substitution of a download, mirror, message attachment, or distribution channel. A matching checksum obtained through the same compromised channel does not establish publisher identity.
 **Impact:** Execution of a substituted desktop installer, potentially with installation privileges.
 
-- [ ] Verify signature/provenance status of the actual published installers before applying local-artifact conclusions to them.
+- [x] Verify signature/provenance status of the actual published installers before applying local-artifact conclusions to them.
 - [ ] Define publisher signing for Windows and Developer ID signing/notarization for macOS; define authenticated release metadata/provenance for Linux.
 - [ ] Keep signing keys and credentials in an appropriate signing service or protected CI secrets. Never place secrets in chat or the repository.
 - [ ] Sign final executable/package layers in the correct order, then generate checksums/provenance for the final distributed bytes. Restrict credential use to trusted release contexts.
@@ -354,3 +354,21 @@ replacement of trusted system files is not attested.
 ## SEC-004 user disposition (2026-11-18)
 
 The user explicitly requested leaving LAN HTTP/SOCKS/mixed access unchanged and marking this task as not to be implemented. No proxy configuration, authentication, listener, routing, firewall or reachability changes/tests were made for SEC-004. Work proceeds to SEC-006.
+
+## SEC-006 published release audit (2026-11-18)
+
+- Audited actual public release [v0.1.0](https://github.com/Arap919/Xkeen-installer/releases/tag/v0.1.0), published 2026-11-15T20:26:09Z, source commit 79d0cab2eee5eee9e837eab72edbc1b9d79812cd. Release API reports immutable=false.
+- Downloaded all four installers and SHA256SUMS without executing installers/apps. Every file size and SHA256 matched release asset API metadata; all four installer hashes also matched SHA256SUMS. Same-channel checksums establish consistency, not publisher identity.
+- Audited bytes (SHA256):
+  - Windows setup.exe: fbe167d4083624d08083a991cf426365c94d5f8e14f118a0b38213ac48b6d929.
+  - macOS AMD64 DMG: fc5a6deccdbccab4b72458faf081427f48db5d4cef9110c5965fe58f79ba5aca.
+  - macOS ARM64 DMG: ec75ea8f37c953b3e9f2c0ad3585d7b7e545f7457f0ea4a80c7a66a654d19644.
+  - Linux AMD64 DEB: c6e1f1e7127a48ec63870b8d661ebafe8df299f1cb22d270229909189a80d55c.
+- Published Windows outer NSIS installer: PE Security Directory file offset=0, size=0, so no embedded Authenticode signature. No external catalog/signature is among the release assets. The inner installed executable was not extracted or executed.
+- Both published DMGs: codesign display returns code object is not signed at all. Read-only mounts each contain one app; codesign reports Signature=adhoc, TeamIdentifier=not set. Strict app signature verification succeeds only for that ad-hoc signature, not a publisher identity. stapler validate returns 65/no stapled ticket for each DMG. Both mounts detached successfully; apps were never launched.
+- Published DEB ar members: debian-binary, control.tar.zst, data.tar.zst; no embedded _gpg signature member. This does not claim that DEB format itself requires an embedded signature; authenticated repository/release metadata could provide the trust boundary instead.
+- gh attestation verify -R Arap919/Xkeen-installer failed for each exact installer digest with HTTP 404 for the SLSA build-provenance query. gh release verify v0.1.0 explicitly reports no attestations for that tag. No cryptographic build/release provenance was verified.
+- Reviewed workflow from the published tag and current feature branch: plain SHA256SUMS and release upload, no publisher signing/notarization/attestation steps. Repository Actions secrets list is empty; only secret names were queried, never values. This does not establish absence of developer certificates in external accounts or local keychains.
+- No release asset, tag, repository setting, signing credential, OS trust store or router was changed during audit. Workflow implementation awaits the user's signing approach/account prerequisites; SEC-006 remains open.
+
+SEC-006 independent audit review: the separate security specialist independently confirmed all saved release file sizes/digests and SHA256SUMS, Windows PE Security Directory=(0,0), the three DEB members and absence of signing/notarization/attestation steps in published/current workflows. Two stale published-assets evidence statements were corrected. MacOS/network/API results remain root's direct verification, not an independent repeat. No substantive issue with the qualified findings was identified. The specialist confirmed GitHub provenance is a possible first stage, not a replacement for the original Authenticode/Developer ID/notarization acceptance.
